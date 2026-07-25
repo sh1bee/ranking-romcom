@@ -1,3 +1,5 @@
+import { DEFAULT_ROMCOMS } from './defaultRomcoms.js';
+
 export class StorageManager {
   static STORAGE_KEY = 'rankedMovies';
   static DB_NAME = 'RankingRomcomDB';
@@ -54,6 +56,17 @@ export class StorageManager {
         
         // Ensure IndexedDB is up to date with merged results
         await this._saveAllToDB(this._cache);
+      }
+
+      // 5. Seed default romcom dataset if database is completely empty (first-time Vercel visitor!)
+      if (this._cache.length === 0) {
+        this._cache = [...DEFAULT_ROMCOMS];
+        await this._saveAllToDB(this._cache);
+        try {
+          localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this._cache));
+        } catch (e) {
+          console.warn('LocalStorage quota exceeded for seed data, using IndexedDB.');
+        }
       }
     } catch (err) {
       console.error('Failed to initialize IndexedDB, fallback to localStorage:', err);
