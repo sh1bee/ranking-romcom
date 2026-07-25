@@ -71,6 +71,37 @@ export class StorageManager {
     } catch (err) {
       console.error('Failed to initialize IndexedDB, fallback to localStorage:', err);
     }
+
+    // 6. Utility: Cho phép người dùng trích xuất nguyên trạng dữ liệu trên localhost thành file defaultRomcoms.js
+    if (typeof window !== 'undefined') {
+      window.exportDefaultRomcoms = () => {
+        const dataStr = "export const DEFAULT_ROMCOMS = " + JSON.stringify(StorageManager._cache, null, 2) + ";\n";
+        
+        // Tự động tạo và tải xuống file defaultRomcoms.js
+        const blob = new Blob([dataStr], { type: 'text/javascript;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'defaultRomcoms.js';
+        a.click();
+        URL.revokeObjectURL(url);
+
+        // Đồng thời chép thẳng vào Clipboard cho nhanh
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(dataStr).catch(() => {});
+        }
+
+        alert("🎉 ĐÃ XUẤT THÀNH CÔNG!\n\nFile 'defaultRomcoms.js' chứa nguyên trọn 100% dữ liệu và hình ảnh trên localhost của bạn vừa được tải xuống máy.\n\n👉 Bạn hãy lấy file tải xuống đó thay thế vào 'src/data/defaultRomcoms.js' trong code rồi git push lên Vercel nhé!");
+      };
+
+      // Tự động gán tổ hợp phím Cmd+Shift+E (hoặc Ctrl+Shift+E) để xuất nhanh
+      window.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'e') {
+          e.preventDefault();
+          window.exportDefaultRomcoms();
+        }
+      });
+    }
   }
 
   static _getAllFromDB() {
