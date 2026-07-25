@@ -25,8 +25,10 @@ export const CARD_DATA = [
 ];
 
 export const TIER_CONFIG = {
-  S: { name: 'S TIER', label: 'MASTERPIECE', color: '#D97706', bgGradient: '#FEF3C7', border: '#000000' },
-  A: { name: 'A TIER', label: 'EXCELLENT', color: '#DC2626', bgGradient: '#FEE2E2', border: '#000000' },
-  B: { name: 'B TIER', label: 'GREAT', color: '#7C3AED', bgGradient: '#EDE9FE', border: '#000000' },
-  C: { name: 'C TIER', label: 'DECENT', color: '#2563EB', bgGradient: '#DBEAFE', border: '#000000' }
+  Peak: { label: 'GOD TIER', color: '#0ea5e9', bgGradient: 'linear-gradient(135deg, #e0f2fe, #bae6fd)' },
+  S: { label: 'MASTERPIECE', color: '#f59e0b', bgGradient: 'linear-gradient(135deg, #fef3c7, #fde68a)' },
+  A: { label: 'AMAZING', color: '#ef4444', bgGradient: 'linear-gradient(135deg, #fee2e2, #fecaca)' },
+  B: { label: 'GOOD', color: '#8b5cf6', bgGradient: 'linear-gradient(135deg, #ede9fe, #ddd6fe)' },
+  C: { label: 'AVERAGE', color: '#3b82f6', bgGradient: 'linear-gradient(135deg, #dbeafe, #bfdbfe)' },
+  Trash: { label: 'GARBAGE', color: '#78350f', bgGradient: 'linear-gradient(135deg, #fef3c7, #d4a373)' }
 };

@@ -48,24 +48,32 @@ export class StorageManager {
     reader.onload = (e) => {
       const img = new Image();
       img.onload = () => {
+        // Keep original aspect ratio but limit max dimension to 1024 for higher quality
+        const MAX_DIMENSION = 1024;
+        let targetWidth = img.width;
+        let targetHeight = img.height;
+
+        if (targetWidth > MAX_DIMENSION || targetHeight > MAX_DIMENSION) {
+          if (targetWidth > targetHeight) {
+            targetHeight = Math.round(targetHeight * (MAX_DIMENSION / targetWidth));
+            targetWidth = MAX_DIMENSION;
+          } else {
+            targetWidth = Math.round(targetWidth * (MAX_DIMENSION / targetHeight));
+            targetHeight = MAX_DIMENSION;
+          }
+        }
+
         const canvas = document.createElement('canvas');
-        canvas.width = 512;
-        canvas.height = 512;
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
         const ctx = canvas.getContext('2d');
         
-        // Draw image covering the 512x512 canvas (cover behavior)
-        const scale = Math.max(512 / img.width, 512 / img.height);
-        const w = img.width * scale;
-        const h = img.height * scale;
-        const x = (512 - w) / 2;
-        const y = (512 - h) / 2;
-        
         ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, 512, 512);
-        ctx.drawImage(img, x, y, w, h);
+        ctx.fillRect(0, 0, targetWidth, targetHeight);
+        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
         
-        // Convert to high-compression JPEG to save localStorage space (0.7 quality)
-        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        // Convert to high quality JPEG
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
         callback(compressedDataUrl);
       };
       img.src = e.target.result;

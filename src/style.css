@@ -322,13 +322,55 @@ html, body {
   font-weight: 600;
 }
 
-#modal-preview-img {
+.cropper-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.cropper-viewport {
+  width: 200px;
+  height: 200px;
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  cursor: grab;
+  background: #000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.cropper-viewport:active {
+  cursor: grabbing;
+}
+
+#cropper-img {
   position: absolute;
   top: 0;
   left: 0;
+  max-width: none;
+  user-select: none;
+  pointer-events: none;
+}
+
+.cropper-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  gap: 4px;
+}
+
+#cropper-zoom {
+  width: 100%;
+  max-width: 200px;
+  cursor: pointer;
 }
 
 .modal-form {
@@ -428,8 +470,8 @@ html, body {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: 700px;
-  max-width: 90vw;
+  width: 900px;
+  max-width: 95vw;
   height: 750px;
   max-height: 85vh;
   background: rgba(20, 20, 20, 0.6);
@@ -489,13 +531,16 @@ html, body {
   width: 100%;
   height: 65%;
   position: relative;
-  background: #000;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .movie-details-modal .movie-image {
   width: 100%; height: 100%;
-  object-fit: cover;
-  opacity: 0.9;
+  object-fit: contain;
+  opacity: 0.95;
 }
 
 .movie-details-modal .movie-tier-badge {

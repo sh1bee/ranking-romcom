@@ -51,8 +51,8 @@ export class TierListUI {
     this.wrapper.innerHTML = `
       <header class="overlay-header">
         <div class="header-left">
-          <span class="header-eyebrow">ULTIMATE</span>
-          <h1 class="header-title">RANKING BOARD</h1>
+          <span class="header-eyebrow">RANKING BOARD</span>
+          <h1 class="header-title">ROM-COM</h1>
         </div>
         <button id="resetBtn" class="reset-btn">
           <span class="reset-icon">↻</span>
@@ -67,7 +67,8 @@ export class TierListUI {
     const labelsContainer = this.wrapper.querySelector('#overlayLabels');
 
     // ─── Tier label badges (positioned left side of each row) ───────
-    const tierKeys = ['S', 'A', 'B', 'C'];
+    // Update order for the 2D UI to match our new tiers
+    const tierKeys = ['Peak', 'S', 'A', 'B', 'C', 'Trash'];
     tierKeys.forEach((key, idx) => {
       const cfg = TIER_CONFIG[key];
 

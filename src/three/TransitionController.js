@@ -21,13 +21,14 @@ export class TransitionController {
     this.isTransitioned = false;
     this.transitionPlanes = [];
     this.gridZ = 0;
-
-    // Row layout config (shared between grid-lock & reverse)
-    this.wallOrder = ['top', 'left', 'right', 'bottom'];
-    this.tierKeys = ['S', 'A', 'B', 'C'];
-    this.rowYPositions = [3.8, 1.3, -1.2, -3.7];
-    this.baseTileSpacing = 2.9; // Increased from 2.4 to fill more space
-    this.baseTileScale = 1.35; // Increased from 1.1
+    this.boardDistance = 21; // Unified camera distance for wide board view
+    
+    this.wallOrder = ['wall_0', 'wall_1', 'wall_2', 'wall_3', 'wall_4', 'wall_5'];
+    this.rowYPositions = [5.05, 2.75, 0.45, -1.85, -4.15, -6.45]; // Shifted down to clear header bar with 2.3 unit intervals
+    
+    // Grid config
+    this.baseTileSpacing = 2.35; // Space between tiles horizontally
+    this.baseTileScale = 1.05; // Proportioned to leave a clean gap between rows without colliding
 
     // Shockwave ring pool for reverse transition VFX
     this.shockwaveRings = [];
@@ -75,7 +76,7 @@ export class TransitionController {
    */
   getVisibleWidth() {
     const fovRad = 42 * THREE.MathUtils.DEG2RAD;
-    const distance = 20;
+    const distance = this.boardDistance || 21;
     const vHeight = 2 * distance * Math.tan(fovRad / 2);
     const aspect = window.innerWidth / window.innerHeight;
     const vWidth = vHeight * aspect;
@@ -90,12 +91,12 @@ export class TransitionController {
     const vWidth = this.getVisibleWidth();
     const leftX = -vWidth / 2;
     const fovRad = 42 * THREE.MathUtils.DEG2RAD;
-    const distance = 20;
+    const distance = this.boardDistance || 21;
     const vHeight = 2 * distance * Math.tan(fovRad / 2);
     const pixelToUnit = vHeight / window.innerHeight;
 
-    // UI badge width is ~160px from the left edge
-    return leftX + 160 * pixelToUnit + (this.baseTileSpacing / 2);
+    // Position immediately adjacent to the HTML tier badge and add '+' button (~145px from edge)
+    return leftX + 145 * pixelToUnit + (this.baseTileScale * 1.0);
   }
 
   /**
@@ -164,7 +165,7 @@ export class TransitionController {
 
     const hidePlanes = this.tunnelManager.allPlanes.filter(p => !planes.includes(p));
     const camZ = camera.position.z;
-    this.gridZ = camZ - 4;
+    this.gridZ = camZ - 7.5; // Pushed further back to fit 6 rows
 
     const master = gsap.timeline({
       onComplete: () => {
@@ -242,12 +243,12 @@ export class TransitionController {
       const wall = plane.userData.wallType;
       plane.userData.isDetached = true;
 
-      let ex = 0, ey = 0;
+      const wallIdx = parseInt(wall.split('_')[1] || 0);
+      const angle = wallIdx * Math.PI / 3 + Math.PI / 2;
       const force = 6 + Math.random() * 8;
-      if (wall === 'top')    { ey =  force; ex = (Math.random() - 0.5) * 4; }
-      if (wall === 'bottom') { ey = -force; ex = (Math.random() - 0.5) * 4; }
-      if (wall === 'left')   { ex = -force; ey = (Math.random() - 0.5) * 4; }
-      if (wall === 'right')  { ex =  force; ey = (Math.random() - 0.5) * 4; }
+      
+      const ex = Math.cos(angle) * force + (Math.random() - 0.5) * 4;
+      const ey = Math.sin(angle) * force + (Math.random() - 0.5) * 4;
 
       master.to(plane.position, {
         x: plane.position.x + ex,
@@ -270,7 +271,7 @@ export class TransitionController {
 
     // Camera pulls back to wide-angle board view
     master.to(camera.position, {
-      x: 0, y: 0, z: camZ + 16,
+      x: 0, y: 0, z: this.gridZ + this.boardDistance,
       duration: 1.4, ease: 'power2.inOut'
     }, 1.3);
 
@@ -307,7 +308,10 @@ export class TransitionController {
     //   Uses dynamic layout to handle many tiles per row.
     // ═══════════════════════════════════════════════════════════════════
 
-    const rowMap = { top: [], left: [], right: [], bottom: [] };
+    // Determine the 6 distinct grid rows
+    const rowMap = {
+      wall_0: [], wall_1: [], wall_2: [], wall_3: [], wall_4: [], wall_5: []
+    };
     planes.forEach(p => {
       const w = p.userData.wallType;
       if (rowMap[w]) rowMap[w].push(p);
@@ -316,27 +320,31 @@ export class TransitionController {
     // Store row data for later use (add card, etc.)
     this.rowMap = rowMap;
 
-    this.wallOrder.forEach((wType, rowIdx) => {
-      const rowPlanes = rowMap[wType];
+    this.wallOrder.forEach((wType, tierIdx) => {
+      const rowPlanes = this.rowMap[wType];
       
-      // Sort so populated cards snap to the left, empty slots to the right
+      // 1. Sort row planes so that ALL movies appear on the far-left of the row, followed by empty tiles
       rowPlanes.sort((a, b) => {
-        if (a.userData.isCard && !b.userData.isCard) return -1;
-        if (!a.userData.isCard && b.userData.isCard) return 1;
-        return 0;
+        const aCard = a.userData.isCard ? 1 : 0;
+        const bCard = b.userData.isCard ? 1 : 0;
+        if (aCard !== bCard) return bCard - aCard;
+        return b.userData.initialPos.z - a.userData.initialPos.z;
       });
 
       const startX = this.getGridStartX();
       const { spacing, scale } = this.getRowLayout(rowPlanes.length);
+      
+      // Pre-calculate target grid positions for these planes
+      const rowY = this.rowYPositions[tierIdx];
 
       rowPlanes.forEach((plane, colIdx) => {
         const targetX = startX + colIdx * spacing;
-        const targetY = this.rowYPositions[rowIdx];
-        const delay = 2.5 + rowIdx * 0.08 + colIdx * 0.03;
+        const targetY = rowY;
+        const delay = 2.5 + tierIdx * 0.08 + colIdx * 0.03;
 
         // Store grid position for reset
         plane.userData.gridPos = { x: targetX, y: targetY, z: this.gridZ };
-        plane.userData.gridRow = rowIdx;
+        plane.userData.gridRow = tierIdx;
 
         master.to(plane.position, {
           x: targetX, y: targetY, z: this.gridZ,
@@ -486,6 +494,16 @@ export class TransitionController {
   respaceTierRow(rowIndex) {
     const wType = this.wallOrder[rowIndex];
     const rowPlanes = this.rowMap[wType];
+    if (!rowPlanes) return;
+
+    // Ensure movies stay grouped on the far-left whenever layout updates
+    rowPlanes.sort((a, b) => {
+      const aCard = a.userData.isCard ? 1 : 0;
+      const bCard = b.userData.isCard ? 1 : 0;
+      if (aCard !== bCard) return bCard - aCard;
+      return 0;
+    });
+
     const startX = this.getGridStartX();
     const { spacing, scale } = this.getRowLayout(rowPlanes.length);
 
@@ -528,7 +546,7 @@ export class TransitionController {
           // Reset to empty tile
           tile.userData.isCard = false;
           tile.userData.cardInfo = null;
-          tile.material = tile.userData.initialMat;
+          tile.material = tile.userData.emptyMat || tile.userData.initialMat;
 
           // Pop back out as an empty tile
           const wType = tile.userData.wallType;

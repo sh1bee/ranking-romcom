@@ -24,7 +24,17 @@ export class MovieUploadModal {
             <span class="upload-icon">📸</span>
             <span class="upload-text">Upload Cover Image</span>
             <input type="file" id="modal-file-input" accept="image/*" />
-            <img id="modal-preview-img" style="display:none;" />
+          </div>
+
+          <div class="cropper-container" id="cropper-container" style="display:none;">
+            <div class="cropper-viewport" id="cropper-viewport">
+              <img id="cropper-img" draggable="false" />
+            </div>
+            <div class="cropper-controls">
+              <label style="font-size:10px; color:#aaa; margin-bottom: 4px;">ZOOM</label>
+              <input type="range" id="cropper-zoom" min="1" max="3" step="0.05" value="1" />
+              <button type="button" class="modal-btn" id="cropper-reselect" style="font-size:12px; padding:6px 12px; margin-top:8px;">🔄 Change Image</button>
+            </div>
           </div>
           
           <div class="modal-form">
@@ -53,11 +63,33 @@ export class MovieUploadModal {
     
     this.fileInput = this.wrapper.querySelector('#modal-file-input');
     this.dropzone = this.wrapper.querySelector('#modal-image-dropzone');
-    this.previewImg = this.wrapper.querySelector('#modal-preview-img');
+    
+    // Cropper elements
+    this.cropperContainer = this.wrapper.querySelector('#cropper-container');
+    this.cropperViewport = this.wrapper.querySelector('#cropper-viewport');
+    this.cropperImg = this.wrapper.querySelector('#cropper-img');
+    this.cropperZoom = this.wrapper.querySelector('#cropper-zoom');
+    this.cropperReselect = this.wrapper.querySelector('#cropper-reselect');
+
     this.titleInput = this.wrapper.querySelector('#modal-title-input');
     this.reviewInput = this.wrapper.querySelector('#modal-review-input');
     
     this.tierBadge = this.wrapper.querySelector('#modal-tier-badge');
+    
+    // Cropper State
+    this.cropState = {
+      baseWidth: 0,
+      baseHeight: 0,
+      vpSize: 200, // viewport px
+      currentX: 0,
+      currentY: 0,
+      zoom: 1,
+      isDragging: false,
+      startX: 0,
+      startY: 0,
+      initialX: 0,
+      initialY: 0
+    };
     
     this.cancelBtn = this.wrapper.querySelector('.modal-cancel-btn');
     this.submitBtn = this.wrapper.querySelector('.modal-submit-btn');
@@ -77,13 +109,39 @@ export class MovieUploadModal {
       if (file) {
         StorageManager.compressImage(file, (compressedDataUrl) => {
           this.currentImageData = compressedDataUrl;
-          this.previewImg.src = compressedDataUrl;
-          this.previewImg.style.display = 'block';
-          this.wrapper.querySelector('.upload-icon').style.display = 'none';
-          this.wrapper.querySelector('.upload-text').style.display = 'none';
+          this.dropzone.style.display = 'none';
+          this.cropperContainer.style.display = 'flex';
+          
+          this.cropperImg.onload = () => {
+            this.initCropper(this.cropperImg);
+          };
+          this.cropperImg.src = compressedDataUrl;
         });
       }
     });
+
+    this.cropperReselect.addEventListener('click', () => {
+      this.fileInput.value = '';
+      this.fileInput.click();
+    });
+
+    this.cropperZoom.addEventListener('input', (e) => {
+      this.cropState.zoom = parseFloat(e.target.value);
+      this.updateCropper();
+    });
+
+    // Panning logic
+    this.cropperViewport.addEventListener('mousedown', (e) => this.startDrag(e.clientX, e.clientY));
+    this.cropperViewport.addEventListener('touchstart', (e) => this.startDrag(e.touches[0].clientX, e.touches[0].clientY), {passive: false});
+    
+    window.addEventListener('mousemove', (e) => this.onDrag(e.clientX, e.clientY));
+    window.addEventListener('touchmove', (e) => {
+      if (this.cropState.isDragging) e.preventDefault(); // prevent scroll
+      this.onDrag(e.touches[0].clientX, e.touches[0].clientY);
+    }, {passive: false});
+    
+    window.addEventListener('mouseup', () => this.endDrag());
+    window.addEventListener('touchend', () => this.endDrag());
 
     this.submitBtn.addEventListener('click', () => {
       const title = this.titleInput.value.trim();
@@ -92,17 +150,98 @@ export class MovieUploadModal {
         return;
       }
 
+      // Calculate normalized crop to save
+      let normX = 0;
+      let normY = 0;
+      if (this.currentImageData) {
+        const scaledW = this.cropState.baseWidth * this.cropState.zoom;
+        const scaledH = this.cropState.baseHeight * this.cropState.zoom;
+        const maxX = Math.max(0, (scaledW - this.cropState.vpSize) / 2);
+        const maxY = Math.max(0, (scaledH - this.cropState.vpSize) / 2);
+        
+        normX = maxX > 0 ? this.cropState.currentX / maxX : 0;
+        normY = maxY > 0 ? this.cropState.currentY / maxY : 0;
+      }
+
       const movieData = {
         id: 'movie_' + Date.now(),
         tier: this.currentTier,
         title: title,
         review: this.reviewInput.value.trim(),
-        image: this.currentImageData || null
+        image: this.currentImageData || null,
+        crop: {
+          x: normX,
+          y: normY,
+          zoom: this.cropState.zoom
+        }
       };
 
       this.onSubmit(movieData);
       this.close();
     });
+  }
+
+  // ─── CROPPER LOGIC ───────────────────────────────────────────────
+
+  initCropper(imgElement) {
+    const imgAspect = imgElement.naturalWidth / imgElement.naturalHeight;
+    // Base width/height ensures the image completely covers the 200x200 viewport at zoom=1
+    if (imgAspect > 1) {
+      this.cropState.baseHeight = this.cropState.vpSize;
+      this.cropState.baseWidth = this.cropState.vpSize * imgAspect;
+    } else {
+      this.cropState.baseWidth = this.cropState.vpSize;
+      this.cropState.baseHeight = this.cropState.vpSize / imgAspect;
+    }
+    
+    this.cropState.currentX = 0;
+    this.cropState.currentY = 0;
+    this.cropState.zoom = 1;
+    this.cropperZoom.value = 1;
+    
+    this.updateCropper();
+  }
+
+  updateCropper() {
+    const state = this.cropState;
+    const scaledW = state.baseWidth * state.zoom;
+    const scaledH = state.baseHeight * state.zoom;
+    
+    // Max offset so the image doesn't reveal the viewport background
+    const maxX = Math.max(0, (scaledW - state.vpSize) / 2);
+    const maxY = Math.max(0, (scaledH - state.vpSize) / 2);
+    
+    state.currentX = Math.max(-maxX, Math.min(maxX, state.currentX));
+    state.currentY = Math.max(-maxY, Math.min(maxY, state.currentY));
+    
+    this.cropperImg.style.width = `${scaledW}px`;
+    this.cropperImg.style.height = `${scaledH}px`;
+    this.cropperImg.style.left = `${(state.vpSize - scaledW) / 2 + state.currentX}px`;
+    this.cropperImg.style.top = `${(state.vpSize - scaledH) / 2 + state.currentY}px`;
+  }
+
+  startDrag(clientX, clientY) {
+    if (this.cropperContainer.style.display === 'none') return;
+    this.cropState.isDragging = true;
+    this.cropState.startX = clientX;
+    this.cropState.startY = clientY;
+    this.cropState.initialX = this.cropState.currentX;
+    this.cropState.initialY = this.cropState.currentY;
+  }
+
+  onDrag(clientX, clientY) {
+    if (!this.cropState.isDragging) return;
+    const dx = clientX - this.cropState.startX;
+    const dy = clientY - this.cropState.startY;
+    
+    this.cropState.currentX = this.cropState.initialX + dx;
+    this.cropState.currentY = this.cropState.initialY + dy;
+    
+    this.updateCropper();
+  }
+
+  endDrag() {
+    this.cropState.isDragging = false;
   }
 
   open(tierKey) {
@@ -114,10 +253,16 @@ export class MovieUploadModal {
     this.reviewInput.value = '';
     this.fileInput.value = '';
     this.currentImageData = null;
-    this.previewImg.src = '';
-    this.previewImg.style.display = 'none';
-    this.wrapper.querySelector('.upload-icon').style.display = 'block';
-    this.wrapper.querySelector('.upload-text').style.display = 'block';
+    
+    this.dropzone.style.display = 'flex';
+    this.cropperContainer.style.display = 'none';
+    this.cropperImg.src = '';
+    
+    // Reset crop state
+    this.cropState.currentX = 0;
+    this.cropState.currentY = 0;
+    this.cropState.zoom = 1;
+    this.cropperZoom.value = 1;
 
     this.wrapper.style.display = 'flex';
     

@@ -148,33 +148,57 @@ function renderInteriorPhotoCanvas(ctx, width, height, card) {
 function renderMovieCardCanvas(ctx, width, height, movie, onUpdate) {
   const drawText = () => {
     // Gradient shadow at the bottom for text readability
-    const grad = ctx.createLinearGradient(0, height * 0.5, 0, height);
+    const grad = ctx.createLinearGradient(0, height * 0.4, 0, height);
     grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(0.6, 'rgba(0,0,0,0.8)');
-    grad.addColorStop(1, 'rgba(0,0,0,0.9)');
+    grad.addColorStop(0.5, 'rgba(0,0,0,0.85)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.95)');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, height * 0.5, width, height * 0.5);
+    ctx.fillRect(0, height * 0.4, width, height * 0.6);
 
-    // Draw Title
+    // Helper function to cleanly truncate text with ellipsis (...) based on actual pixel width
+    const truncateToFit = (text, maxW) => {
+      if (!text) return '';
+      if (ctx.measureText(text).width <= maxW) return text;
+      let str = text;
+      while (str.length > 0 && ctx.measureText(str + '...').width > maxW) {
+        str = str.slice(0, -1);
+      }
+      return str.trimEnd() + '...';
+    };
+
+    // Set text shadows for maximum crispness & readability
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+
+    const maxTextWidth = width - 56; // 28px padding on left and right
+
+    // Draw Title (Fixed bold size, never squished horizontally)
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 48px sans-serif';
+    ctx.font = 'bold 44px system-ui, -apple-system, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
     
-    // Auto scale text if it's too long
-    let title = movie.title || 'Unknown Title';
-    ctx.fillText(title, 32, height - 80, width - 64);
+    const rawTitle = movie.title || 'Unknown Title';
+    const fittedTitle = truncateToFit(rawTitle, maxTextWidth);
+    ctx.fillText(fittedTitle, 28, height - 76);
 
-    // Draw Review/Rating
-    ctx.fillStyle = '#E4E4E7';
-    ctx.font = '24px sans-serif';
+    // Draw Review/Rating (Significantly increased font size from 24px -> 34px bold)
+    ctx.fillStyle = '#F43F5E'; // Vibrant pink/red accent for rating to stand out
+    ctx.font = 'bold 34px system-ui, -apple-system, sans-serif';
     
-    let review = movie.review || '';
-    // simple word wrap for review (1 line max with ellipsis)
-    if (review.length > 35) {
-      review = review.substring(0, 32) + '...';
+    const rawReview = movie.review || '';
+    const fittedReview = truncateToFit(rawReview, maxTextWidth);
+    if (fittedReview) {
+      ctx.fillText(fittedReview, 28, height - 26);
     }
-    ctx.fillText(review, 32, height - 32);
+
+    // Reset shadows before border
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
 
     // Fine border
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
@@ -185,12 +209,23 @@ function renderMovieCardCanvas(ctx, width, height, movie, onUpdate) {
   if (movie.image) {
     const img = new Image();
     img.onload = () => {
-      // Cover mode
-      const scale = Math.max(width / img.width, height / img.height);
-      const w = img.width * scale;
-      const h = img.height * scale;
-      const x = (width - w) / 2;
-      const y = (height - h) / 2;
+      // Cover mode + Cropper offsets
+      let zoom = 1, normX = 0, normY = 0;
+      if (movie.crop) {
+        zoom = movie.crop.zoom || 1;
+        normX = movie.crop.x || 0;
+        normY = movie.crop.y || 0;
+      }
+
+      const baseScale = Math.max(width / img.width, height / img.height);
+      const w = img.width * baseScale * zoom;
+      const h = img.height * baseScale * zoom;
+      
+      const maxX = Math.max(0, (w - width) / 2);
+      const maxY = Math.max(0, (h - height) / 2);
+      
+      const x = (width - w) / 2 + (normX * maxX);
+      const y = (height - h) / 2 + (normY * maxY);
       
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, width, height);
