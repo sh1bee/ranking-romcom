@@ -32,6 +32,7 @@ export class TransitionController {
 
     // Shockwave ring pool for reverse transition VFX
     this.shockwaveRings = [];
+    this.scrollY = 0;
 
     this.createOverlays();
 
@@ -40,6 +41,22 @@ export class TransitionController {
         this.wallOrder.forEach((_, idx) => this.respaceTierRow(idx));
       }
     });
+
+    window.addEventListener('wheel', (e) => {
+      if (!this.isTransitioned || this.isAnimating) return;
+      const detailsModal = document.querySelector('.movie-details-modal');
+      const uploadModal = document.querySelector('.movie-modal-wrapper');
+      if ((detailsModal && detailsModal.style.display !== 'none') || (uploadModal && uploadModal.style.display !== 'none')) {
+        return;
+      }
+
+      const maxScroll = this.getMaxScrollY();
+      if (maxScroll <= 0) return;
+
+      this.scrollY -= e.deltaY * 0.008;
+      this.scrollY = THREE.MathUtils.clamp(this.scrollY, 0, maxScroll);
+      this.applyScroll();
+    }, { passive: true });
   }
 
   createOverlays() {
@@ -99,30 +116,71 @@ export class TransitionController {
     return leftX + 145 * pixelToUnit + (this.baseTileScale * 1.0);
   }
 
-  /**
-   * Calculates the dynamic tile spacing and scale for a row
-   * to keep all tiles visible on screen.
-   */
-  getRowLayout(tileCount) {
+  getItemsPerRow() {
     const vWidth = this.getVisibleWidth();
     const startX = this.getGridStartX();
-    const rightEdge = vWidth / 2;
-    const availableWidth = rightEdge - startX - 0.5; // 0.5 margin from right edge
+    const rightEdge = (vWidth / 2) - 0.6; // Margin from right edge of screen
+    const availableWidth = Math.max(1, rightEdge - startX);
+    const cols = Math.floor(availableWidth / this.baseTileSpacing) + 1;
+    return Math.max(4, cols); // Responsive: expands to fill large monitors!
+  }
 
-    const neededWidth = (tileCount - 1) * this.baseTileSpacing;
+  recalculateRowPositions() {
+    let currentY = 5.05; // Starting Y for Peak tier
+    const lineGap = 2.2;  // Gap between wrapped lines within the same tier
+    const tierGap = 2.3;  // Gap between different tiers
+    const itemsPerRow = this.getItemsPerRow();
 
-    if (neededWidth <= availableWidth || tileCount <= 1) {
-      // All tiles fit with default spacing
-      return { spacing: this.baseTileSpacing, scale: this.baseTileScale };
+    this.rowYPositions = [];
+    this.wallOrder.forEach((wType) => {
+      this.rowYPositions.push(currentY);
+      
+      const rowPlanes = this.rowMap && this.rowMap[wType] ? this.rowMap[wType] : [];
+      const count = rowPlanes.length;
+      const numLines = Math.max(1, Math.ceil(count / itemsPerRow));
+      
+      if (numLines > 1) {
+        currentY -= (numLines - 1) * lineGap + tierGap;
+      } else {
+        currentY -= tierGap;
+      }
+    });
+  }
+
+  getMaxScrollY() {
+    let bottomY = -6.45;
+    const itemsPerRow = this.getItemsPerRow();
+    if (this.rowYPositions && this.rowYPositions.length === 6) {
+      const wType = this.wallOrder[5];
+      const rowPlanes = this.rowMap && this.rowMap[wType] ? this.rowMap[wType] : [];
+      const count = rowPlanes.length;
+      const numLines = Math.max(1, Math.ceil(count / itemsPerRow));
+      bottomY = this.rowYPositions[5] - (numLines - 1) * 2.2 - 1.2;
     }
+    const limit = -7.5;
+    if (bottomY < limit) {
+      return limit - bottomY;
+    }
+    return 0;
+  }
 
-    // Shrink spacing (and proportionally scale) to fit
-    const newSpacing = availableWidth / (tileCount - 1);
-    // Scale proportionally but don't go below 60% of base
-    const scaleRatio = Math.max(newSpacing / this.baseTileSpacing, 0.5);
-    const newScale = this.baseTileScale * scaleRatio;
+  applyScroll() {
+    if (!this.transitionPlanes) return;
+    this.transitionPlanes.forEach(plane => {
+      if (plane.userData && plane.userData.gridPos) {
+        plane.position.y = plane.userData.gridPos.y + this.scrollY;
+      }
+    });
+    if (this.onLayoutChange) {
+      this.onLayoutChange();
+    }
+  }
 
-    return { spacing: newSpacing, scale: newScale };
+  /**
+   * Always maintain uniform size and spacing. When exceeding 8 slots, items wrap onto new rows.
+   */
+  getRowLayout(tileCount) {
+    return { spacing: this.baseTileSpacing, scale: this.baseTileScale };
   }
 
   startTransition(onOverlayReady) {
@@ -130,24 +188,57 @@ export class TransitionController {
     this.isAnimating = true;
 
     const camera = this.threeSetup.camera;
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 1 — WARP CLIMAX (0s – 0.5s)
+    //   During this 0.5s high-speed warp, NO tiles are detached yet so that
+    //   TunnelManager object pooling recycles all rings without leaving any gap!
+    // ═══════════════════════════════════════════════════════════════════
+    const phase1 = gsap.timeline({
+      onComplete: () => {
+        this._executePhase2To5(onOverlayReady);
+      }
+    });
+
+    phase1.to(this.tunnelManager, {
+      currentSpeed: 4.5,
+      duration: 0.4,
+      ease: 'power4.in'
+    }, 0);
+
+    phase1.to(camera, {
+      fov: 110,
+      duration: 0.5,
+      ease: 'power3.in',
+      onUpdate: () => camera.updateProjectionMatrix()
+    }, 0);
+
+    phase1.to(this.vignette, {
+      opacity: 0.6,
+      duration: 0.4,
+      ease: 'power2.in'
+    }, 0);
+
+    return phase1;
+  }
+
+  _executePhase2To5(onOverlayReady) {
+    const camera = this.threeSetup.camera;
+
+    // Now that the camera has reached its sudden stop, we select the 48 nearest tiles
+    // right in front of the camera and detach them for the explosion!
     const planes = this.getTransitionPlanes();
-    this.transitionPlanes = planes;
 
     // Ensure all movies (isCard === true) are included in the transition planes!
-    // Because the tunnel loops infinitely, a movie tile might have been pooled far behind the camera.
-    // If a card is not in `planes`, we swap it with an empty plane inside `planes` of the same wallType.
     const allCards = this.tunnelManager.allPlanes.filter(p => p.userData.isCard);
     allCards.forEach(cardPlane => {
       if (!planes.includes(cardPlane)) {
-        // Find an empty plane in `planes` on the same wall
         const emptyPlane = planes.find(p => p.userData.wallType === cardPlane.userData.wallType && !p.userData.isCard);
         if (emptyPlane) {
-          // Swap materials
           const tempMat = emptyPlane.material;
           emptyPlane.material = cardPlane.material;
           cardPlane.material = tempMat;
           
-          // Swap userData relevant to cards
           const tempIsCard = emptyPlane.userData.isCard;
           const tempCardInfo = emptyPlane.userData.cardInfo;
           const tempInitialIsCard = emptyPlane.userData.initialIsCard;
@@ -159,11 +250,31 @@ export class TransitionController {
           cardPlane.userData.isCard = tempIsCard;
           cardPlane.userData.cardInfo = tempCardInfo;
           cardPlane.userData.initialIsCard = tempInitialIsCard;
+        } else {
+          // Khi tier có hơn 8 phim (không còn ô rỗng trong cụm 8 ô đầu của wall để hoán đổi),
+          // mang trực tiếp thẻ phim này từ dưới hầm lên tham gia vào cụm bay ra bảng Ranking!
+          planes.push(cardPlane);
         }
       }
     });
 
+    this.transitionPlanes = planes;
     const hidePlanes = this.tunnelManager.allPlanes.filter(p => !planes.includes(p));
+
+    // Tách (clone) material của 48 tấm ngói chuyển lên Ranking Board để khi làm mờ hầm, ngói trên board không bị suy giảm opacity do dùng chung material
+    planes.forEach(p => {
+      if (p.material) p.material = p.material.clone();
+      if (p.userData.emptyMat) p.userData.emptyMat = p.userData.emptyMat.clone();
+      if (p.userData.initialMat) p.userData.initialMat = p.userData.initialMat.clone();
+      if (p.children) {
+        p.children.forEach(child => {
+          if (child.isLineSegments && child.material) {
+            child.material = child.material.clone();
+          }
+        });
+      }
+    });
+
     const camZ = camera.position.z;
     this.gridZ = camZ - 7.5; // Pushed further back to fit 6 rows
 
@@ -175,41 +286,18 @@ export class TransitionController {
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 1 — WARP CLIMAX (0s – 0.5s)
-    // ═══════════════════════════════════════════════════════════════════
-
-    master.to(this.tunnelManager, {
-      currentSpeed: 4.5,
-      duration: 0.4,
-      ease: 'power4.in'
-    }, 0);
-
-    master.to(camera, {
-      fov: 110,
-      duration: 0.5,
-      ease: 'power3.in',
-      onUpdate: () => camera.updateProjectionMatrix()
-    }, 0);
-
-    master.to(this.vignette, {
-      opacity: 0.6,
-      duration: 0.4,
-      ease: 'power2.in'
-    }, 0);
-
-    // ═══════════════════════════════════════════════════════════════════
-    // PHASE 2 — TUNNEL SHATTER (0.5s – 1.4s)
+    // PHASE 2 — TUNNEL SHATTER (0.0s – 0.9s)
     // ═══════════════════════════════════════════════════════════════════
 
     // Sudden stop
     master.to(this.tunnelManager, {
       currentSpeed: 0, targetSpeed: 0,
       duration: 0.15, ease: 'power4.out'
-    }, 0.5);
+    }, 0);
 
     // WHITE FLASH
-    master.to(this.flash, { opacity: 0.85, duration: 0.08, ease: 'power4.in' }, 0.5);
-    master.to(this.flash, { opacity: 0, duration: 0.8, ease: 'power2.out' }, 0.58);
+    master.to(this.flash, { opacity: 0.85, duration: 0.08, ease: 'power4.in' }, 0);
+    master.to(this.flash, { opacity: 0, duration: 0.8, ease: 'power2.out' }, 0.08);
 
     // CAMERA SHAKE
     const shakeTimeline = gsap.timeline();
@@ -223,20 +311,40 @@ export class TransitionController {
       });
     }
     shakeTimeline.to(camera.position, { x: camOrigX, y: camOrigY, duration: 0.05 });
-    master.add(shakeTimeline, 0.5);
+    master.add(shakeTimeline, 0);
 
-    // Hide background planes instantly
-    hidePlanes.forEach(p => {
-      master.set(p.material, { opacity: 0 }, 0.52);
-    });
+    // Hướng tiếp cận hoàn toàn mới (0 Lag - 60 FPS): Hút sâu background hầm về điểm kỳ dị ở cuối hầm (Warp-out Implosion)
+    // Thay vì làm mờ opacity trên 1400+ vật thể gây quá tải Alpha Blending và CPU sorting, ta gom toàn bộ phần sau của hầm
+    // vào 1 Group duy nhất và hút tốc độ cao vào điểm kỳ dị trong lén lút lúc màn hình trắng sáng nổ ra.
+    const bgGroup = new THREE.Group();
+    this.tunnelManager.tunnelGroup.add(bgGroup);
+    this.bgGroup = bgGroup;
 
-    // Hide seam lines instantly
-    this.tunnelManager.seamLines.forEach(line => {
-      master.set(line.material, { opacity: 0 }, 0.52);
-    });
+    hidePlanes.forEach(p => bgGroup.add(p));
+    this.tunnelManager.seamLines.forEach(line => bgGroup.add(line));
+
+    // Animate HÚT SÂU background vào điểm kỳ dị (với vỏn vẹn 2 tweens trên 1 object duy nhất)
+    master.to(bgGroup.position, {
+      z: -120, // Hút lùi về hố sâu vô tận
+      duration: 0.85,
+      ease: 'power3.in'
+    }, 0.15);
+
+    master.to(bgGroup.scale, {
+      x: 0.001,
+      y: 0.001,
+      z: 0.001,
+      duration: 0.85,
+      ease: 'power3.in'
+    }, 0.15);
+
+    // Ẩn group nền ngay khi hút xong để trả lại 100% sức mạnh GPU cho Bảng Xếp Hạng
+    master.call(() => {
+      bgGroup.visible = false;
+    }, null, 1.0);
 
     // Vignette fades out
-    master.to(this.vignette, { opacity: 0, duration: 0.6, ease: 'power2.out' }, 0.6);
+    master.to(this.vignette, { opacity: 0, duration: 0.6, ease: 'power2.out' }, 0.1);
 
     // EXPLODE tiles outward by wall direction
     planes.forEach((plane) => {
@@ -255,36 +363,36 @@ export class TransitionController {
         y: plane.position.y + ey,
         z: camZ - 8 + Math.random() * 4,
         duration: 0.7, ease: 'power2.out'
-      }, 0.52 + Math.random() * 0.1);
+      }, 0.02 + Math.random() * 0.1);
 
       master.to(plane.rotation, {
         x: plane.rotation.x + (Math.random() - 0.5) * Math.PI * 2,
         y: plane.rotation.y + (Math.random() - 0.5) * Math.PI * 2,
         z: (Math.random() - 0.5) * Math.PI,
         duration: 0.7, ease: 'power2.out'
-      }, 0.52 + Math.random() * 0.1);
+      }, 0.02 + Math.random() * 0.1);
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 3 — VORTEX REGROUP (1.4s – 2.5s)
+    // PHASE 3 — VORTEX REGROUP (0.8s – 2.0s)
     // ═══════════════════════════════════════════════════════════════════
 
     // Camera pulls back to wide-angle board view
     master.to(camera.position, {
       x: 0, y: 0, z: this.gridZ + this.boardDistance,
       duration: 1.4, ease: 'power2.inOut'
-    }, 1.3);
+    }, 0.8);
 
     master.to(camera, {
       fov: 42,
       duration: 1.4,
       ease: 'power2.inOut',
       onUpdate: () => camera.updateProjectionMatrix()
-    }, 1.3);
+    }, 0.8);
 
     // Spiral mid-waypoints
     planes.forEach((plane, i) => {
-      const delay = 1.4 + i * 0.015;
+      const delay = 0.9 + i * 0.015;
       const angle = (i / planes.length) * Math.PI * 2;
       const spiralR = 3 + Math.random() * 2;
 
@@ -302,13 +410,9 @@ export class TransitionController {
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 4 — GRID LOCK (2.5s – 3.5s)
-    //   Tiles snap into a 4-row ranking grid.
-    //   These tiles ARE the final ranking board.
-    //   Uses dynamic layout to handle many tiles per row.
+    // PHASE 4 — GRID LOCK (2.0s – 3.0s)
     // ═══════════════════════════════════════════════════════════════════
 
-    // Determine the 6 distinct grid rows
     const rowMap = {
       wall_0: [], wall_1: [], wall_2: [], wall_3: [], wall_4: [], wall_5: []
     };
@@ -317,13 +421,13 @@ export class TransitionController {
       if (rowMap[w]) rowMap[w].push(p);
     });
 
-    // Store row data for later use (add card, etc.)
     this.rowMap = rowMap;
+    this.scrollY = 0;
+    this.recalculateRowPositions();
 
     this.wallOrder.forEach((wType, tierIdx) => {
       const rowPlanes = this.rowMap[wType];
       
-      // 1. Sort row planes so that ALL movies appear on the far-left of the row, followed by empty tiles
       rowPlanes.sort((a, b) => {
         const aCard = a.userData.isCard ? 1 : 0;
         const bCard = b.userData.isCard ? 1 : 0;
@@ -332,18 +436,20 @@ export class TransitionController {
       });
 
       const startX = this.getGridStartX();
-      const { spacing, scale } = this.getRowLayout(rowPlanes.length);
+      const lineGap = 2.2;
+      const scale = this.baseTileScale;
+      const spacing = this.baseTileSpacing;
+      const itemsPerRow = this.getItemsPerRow();
       
-      // Pre-calculate target grid positions for these planes
-      const rowY = this.rowYPositions[tierIdx];
-
       rowPlanes.forEach((plane, colIdx) => {
-        const targetX = startX + colIdx * spacing;
-        const targetY = rowY;
-        const delay = 2.5 + tierIdx * 0.08 + colIdx * 0.03;
+        const lineIdx = Math.floor(colIdx / itemsPerRow);
+        const colOnLine = colIdx % itemsPerRow;
+        const targetX = startX + colOnLine * spacing;
+        const targetY = this.rowYPositions[tierIdx] - lineIdx * lineGap;
+        const delay = 2.0 + tierIdx * 0.08 + colIdx * 0.03;
 
-        // Store grid position for reset
         plane.userData.gridPos = { x: targetX, y: targetY, z: this.gridZ };
+        plane.userData.gridScale = scale;
         plane.userData.gridRow = tierIdx;
 
         master.to(plane.position, {
@@ -359,14 +465,12 @@ export class TransitionController {
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 5 — OVERLAY (3.4s – 3.8s)
-    //   HTML tier labels + header slide in over the 3D grid.
-    //   No canvas fade. The 3D tiles stay visible as the board.
+    // PHASE 5 — OVERLAY (2.9s – 3.3s)
     // ═══════════════════════════════════════════════════════════════════
 
     master.call(() => {
       if (onOverlayReady) onOverlayReady();
-    }, null, 3.4);
+    }, null, 2.9);
 
     return master;
   }
@@ -462,14 +566,19 @@ export class TransitionController {
       gridRow: rowIndex
     };
 
-    // Push first so getRowLayout counts the new tile
+    // Push first so recalculateRowPositions counts the new tile
     rowPlanes.push(mesh);
+    this.recalculateRowPositions();
 
     const startX = this.getGridStartX();
-    const { spacing, scale } = this.getRowLayout(rowPlanes.length);
+    const scale = this.baseTileScale;
+    const spacing = this.baseTileSpacing;
+    const itemsPerRow = this.getItemsPerRow();
     const newColIdx = rowPlanes.length - 1;
-    const targetX = startX + newColIdx * spacing;
-    const targetY = this.rowYPositions[rowIndex];
+    const lineIdx = Math.floor(newColIdx / itemsPerRow);
+    const colOnLine = newColIdx % itemsPerRow;
+    const targetX = startX + colOnLine * spacing;
+    const targetY = (this.rowYPositions[rowIndex] - lineIdx * 2.2) + (this.scrollY || 0);
 
     mesh.position.set(targetX, targetY + 6, this.gridZ - 3);
     mesh.scale.set(0.3, 0.3, 1);
@@ -477,6 +586,7 @@ export class TransitionController {
 
     this.tunnelManager.tunnelGroup.add(mesh);
     this.tunnelManager.allPlanes.push(mesh);
+    if (this.transitionPlanes) this.transitionPlanes.push(mesh);
 
     // Fly down
     gsap.to(mesh.position, { y: targetY, z: this.gridZ, duration: 0.8, ease: 'back.out(1.5)' });
@@ -492,37 +602,53 @@ export class TransitionController {
    * Re-layout all tiles in a tier row with dynamic spacing/scale.
    */
   respaceTierRow(rowIndex) {
-    const wType = this.wallOrder[rowIndex];
-    const rowPlanes = this.rowMap[wType];
-    if (!rowPlanes) return;
-
-    // Ensure movies stay grouped on the far-left whenever layout updates
-    rowPlanes.sort((a, b) => {
-      const aCard = a.userData.isCard ? 1 : 0;
-      const bCard = b.userData.isCard ? 1 : 0;
-      if (aCard !== bCard) return bCard - aCard;
-      return 0;
-    });
-
+    this.recalculateRowPositions();
     const startX = this.getGridStartX();
-    const { spacing, scale } = this.getRowLayout(rowPlanes.length);
+    const lineGap = 2.2;
+    const scale = this.baseTileScale;
+    const spacing = this.baseTileSpacing;
 
-    rowPlanes.forEach((plane, colIdx) => {
-      const targetX = startX + colIdx * spacing;
-      if (plane.userData.gridPos) {
-        plane.userData.gridPos.x = targetX;
-      }
-      gsap.to(plane.position, {
-        x: targetX,
-        duration: 0.6,
-        ease: 'power2.out'
+    this.wallOrder.forEach((wType, idx) => {
+      const rowPlanes = this.rowMap[wType];
+      if (!rowPlanes) return;
+
+      // Ensure movies stay grouped on the far-left whenever layout updates
+      rowPlanes.sort((a, b) => {
+        const aCard = a.userData.isCard ? 1 : 0;
+        const bCard = b.userData.isCard ? 1 : 0;
+        if (aCard !== bCard) return bCard - aCard;
+        return 0;
       });
-      gsap.to(plane.scale, {
-        x: scale, y: scale,
-        duration: 0.5,
-        ease: 'power2.out'
+
+      const itemsPerRow = this.getItemsPerRow();
+      rowPlanes.forEach((plane, colIdx) => {
+        const lineIdx = Math.floor(colIdx / itemsPerRow);
+        const colOnLine = colIdx % itemsPerRow;
+        const targetX = startX + colOnLine * spacing;
+        const targetY = (this.rowYPositions[idx] - lineIdx * lineGap) + (this.scrollY || 0);
+
+        plane.userData.gridPos = { x: targetX, y: targetY - (this.scrollY || 0), z: this.gridZ };
+        plane.userData.gridScale = scale;
+        
+        gsap.to(plane.position, {
+          x: targetX,
+          y: targetY,
+          duration: 0.6,
+          ease: 'power2.out',
+          overwrite: 'auto'
+        });
+        gsap.to(plane.scale, {
+          x: scale, y: scale,
+          duration: 0.5,
+          ease: 'power2.out',
+          overwrite: 'auto'
+        });
       });
     });
+
+    if (this.onLayoutChange) {
+      this.onLayoutChange();
+    }
   }
 
   /**
@@ -601,6 +727,8 @@ export class TransitionController {
 
     // Remove any dynamically added tiles first
     this._cleanupDynamicTiles();
+    this.scrollY = 0;
+    if (this.onLayoutChange) this.onLayoutChange();
 
     const tl = gsap.timeline({
       onComplete: () => {
@@ -745,6 +873,10 @@ export class TransitionController {
 
     // Behind the flash: reset everything
     tl.call(() => {
+      if (this.bgGroup && this.bgGroup.parent) {
+        this.bgGroup.parent.remove(this.bgGroup);
+        this.bgGroup = null;
+      }
       // Rebuild the tunnel in the background (will wrap around current camera Z)
       this.tunnelManager.rebuildTunnel();
     }, null, warpStart + 0.8);
@@ -798,7 +930,7 @@ export class TransitionController {
     this.tunnelManager.allPlanes.forEach(plane => {
       if (!plane.userData.initialPos) {
         // This was a dynamically added tile — remove it
-        scene.remove(plane);
+        if (plane.parent) plane.parent.remove(plane);
         plane.geometry?.dispose();
         plane.material?.dispose();
         toRemove.push(plane);
@@ -809,6 +941,9 @@ export class TransitionController {
     this.tunnelManager.allPlanes = this.tunnelManager.allPlanes.filter(
       p => !toRemove.includes(p)
     );
+    if (this.transitionPlanes) {
+      this.transitionPlanes = this.transitionPlanes.filter(p => !toRemove.includes(p));
+    }
   }
 
   /**

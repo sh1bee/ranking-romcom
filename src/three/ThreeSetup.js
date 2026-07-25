@@ -59,6 +59,8 @@ export class ThreeSetup {
     this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(this.width, this.height);
+    this.needsRender = true;
+    this.render();
   }
 
   render() {

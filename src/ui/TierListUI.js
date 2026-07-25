@@ -15,6 +15,9 @@ export class TierListUI {
     this.container = containerElement;
     this.onReset = onReset;
     this.transitionCtrl = transitionController;
+    if (this.transitionCtrl) {
+      this.transitionCtrl.onLayoutChange = () => this.updatePositions();
+    }
 
     // Initialize Modal
     this.uploadModal = new MovieUploadModal(document.body, (movieData) => {
@@ -40,6 +43,9 @@ export class TierListUI {
 
   setTransitionController(tc) {
     this.transitionCtrl = tc;
+    if (this.transitionCtrl) {
+      this.transitionCtrl.onLayoutChange = () => this.updatePositions();
+    }
   }
 
   build() {
@@ -121,9 +127,10 @@ export class TierListUI {
     const rows = this.wrapper.querySelectorAll('.overlay-label-row');
     const headerHeight = this.wrapper.querySelector('.overlay-header').offsetHeight;
     
-    // We project the 3D row Y positions to 2D screen coordinates
+    // We project the 3D row Y positions (with vertical scroll offset) to 2D screen coordinates
     this.transitionCtrl.rowYPositions.forEach((y, idx) => {
-      const vec = new THREE.Vector3(0, y, gridZ);
+      const scrollY = this.transitionCtrl.scrollY || 0;
+      const vec = new THREE.Vector3(0, y + scrollY, gridZ);
       vec.project(camera);
       // vec.y is between -1 (bottom) and 1 (top)
       const screenY = (-(vec.y - 1) / 2) * window.innerHeight;

@@ -33,10 +33,30 @@ export class InteractionController {
     document.body.appendChild(this.container);
   }
 
+  isModalOpen() {
+    const detailsModal = document.querySelector('.movie-details-modal');
+    if (detailsModal && detailsModal.style.display !== 'none') return true;
+    const uploadModal = document.querySelector('.movie-modal-wrapper');
+    if (uploadModal && uploadModal.style.display !== 'none') return true;
+    return false;
+  }
+
+  clearHover() {
+    if (this.hoveredMesh && this.hoveredMesh.userData.gridPos) {
+      const homeZ = this.hoveredMesh.userData.gridPos.z;
+      const homeScale = this.hoveredMesh.userData.gridScale || (this.transitionController ? this.transitionController.baseTileScale : 1);
+      gsap.to(this.hoveredMesh.position, { z: homeZ, duration: 0.25, ease: 'power2.out', overwrite: 'auto' });
+      gsap.to(this.hoveredMesh.scale, { x: homeScale, y: homeScale, duration: 0.25, ease: 'power2.out', overwrite: 'auto' });
+      this.hoveredMesh = null;
+    }
+    document.body.style.cursor = 'default';
+  }
+
   attachEvents() {
     const handleStart = (e) => {
+      if (this.isModalOpen()) return;
       // Ignore if clicking UI elements (overlay buttons, tier badges, etc.)
-      if (e.target.closest('.reset-btn, .overlay-add-btn, .overlay-tier-badge, .overlay-header, .movie-details-modal')) return;
+      if (e.target.closest('.reset-btn, .overlay-add-btn, .overlay-tier-badge, .overlay-header, .movie-details-modal, .movie-modal-wrapper')) return;
       
       // If we are on the ranking board (hasTriggered is true), check for clicks on tiles
       if (this.hasTriggered) {
@@ -81,9 +101,9 @@ export class InteractionController {
 
     if (clientX === undefined || clientY === undefined) return;
 
-    // Do not hover if the modal is open
-    if (document.querySelector('.movie-details-modal') && document.querySelector('.movie-details-modal').style.display !== 'none') {
-      document.body.style.cursor = 'default';
+    // Do not hover if any modal is open
+    if (this.isModalOpen()) {
+      this.clearHover();
       return;
     }
 
@@ -98,10 +118,31 @@ export class InteractionController {
     const intersects = this.raycaster.intersectObjects(this.transitionController.transitionPlanes);
 
     let hoveringCard = false;
+    let targetMesh = null;
     if (intersects.length > 0) {
       const hit = intersects.find(hit => hit.object.userData && hit.object.userData.isCard);
       if (hit) {
         hoveringCard = true;
+        targetMesh = hit.object;
+      }
+    }
+
+    if (targetMesh !== this.hoveredMesh) {
+      if (this.hoveredMesh && this.hoveredMesh.userData.gridPos) {
+        const homeZ = this.hoveredMesh.userData.gridPos.z;
+        const homeScale = this.hoveredMesh.userData.gridScale || this.transitionController.baseTileScale;
+        gsap.to(this.hoveredMesh.position, { z: homeZ, duration: 0.25, ease: 'power2.out', overwrite: 'auto' });
+        gsap.to(this.hoveredMesh.scale, { x: homeScale, y: homeScale, duration: 0.25, ease: 'power2.out', overwrite: 'auto' });
+      }
+
+      this.hoveredMesh = targetMesh;
+
+      if (this.hoveredMesh && this.hoveredMesh.userData.gridPos) {
+        const homeZ = this.hoveredMesh.userData.gridPos.z;
+        const homeScale = this.hoveredMesh.userData.gridScale || this.transitionController.baseTileScale;
+        // Hiệu ứng Pop-out 3D bay nhẹ ra xa và phóng to để rõ nét trên hàng ảnh xếp đè lên nhau
+        gsap.to(this.hoveredMesh.position, { z: homeZ + 0.45, duration: 0.35, ease: 'back.out(1.5)', overwrite: 'auto' });
+        gsap.to(this.hoveredMesh.scale, { x: homeScale * 1.12, y: homeScale * 1.12, duration: 0.35, ease: 'back.out(1.5)', overwrite: 'auto' });
       }
     }
 
@@ -109,6 +150,8 @@ export class InteractionController {
   }
 
   handleBoardClick(event) {
+    if (this.isModalOpen() || event.target.closest('.movie-modal-wrapper, .movie-details-modal, .overlay-header')) return;
+
     // Determine coordinates (support both mouse and touch)
     let clientX, clientY;
     if (event.changedTouches && event.changedTouches.length > 0) {
@@ -193,6 +236,7 @@ export class InteractionController {
   }
 
   resetUI() {
+    this.clearHover();
     this.hasTriggered = false;
     this.isHolding = false;
     this.container.style.pointerEvents = 'auto';

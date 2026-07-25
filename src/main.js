@@ -3,7 +3,9 @@ import { TunnelManager } from './three/TunnelManager.js';
 import { TransitionController } from './three/TransitionController.js';
 import { InteractionController } from './ui/InteractionController.js';
 import { TierListUI } from './ui/TierListUI.js';
+import { StorageManager } from './data/StorageManager.js';
 import * as THREE from 'three';
+import gsap from 'gsap';
 
 class App {
   constructor() {
@@ -67,11 +69,32 @@ class App {
   animate() {
     requestAnimationFrame(this.animate);
     const delta = this.clock.getDelta();
-    this.tunnelManager.update(delta);
-    this.threeSetup.render();
+    
+    // Phase 2 Optimization: Conditional render loop to eliminate idle lag on ranking board
+    const isWarpingOrTunnel = !this.transitionController.isTransitioned || this.transitionController.isAnimating;
+    const hasActiveTweens = gsap && gsap.globalTimeline && gsap.globalTimeline.isActive();
+
+    if (isWarpingOrTunnel) {
+      this.tunnelManager.update(delta);
+    }
+
+    if (isWarpingOrTunnel || hasActiveTweens) {
+      this.threeSetup.render();
+      this.idleFrames = 0;
+    } else {
+      // Allow a 30-frame buffer after animations settle before suspending rendering
+      if ((this.idleFrames || 0) < 30) {
+        this.idleFrames = (this.idleFrames || 0) + 1;
+        this.threeSetup.render();
+      } else if (this.threeSetup.needsRender) {
+        this.threeSetup.needsRender = false;
+        this.threeSetup.render();
+      }
+    }
   }
 }
 
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+  await StorageManager.init();
   new App();
 });

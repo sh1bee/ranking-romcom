@@ -86,11 +86,10 @@ export class TunnelManager {
     const edgesGeo = new THREE.EdgesGeometry(squareGeo);
     const blackLineMat = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
 
-    // Base Cream Tile Material (#FAF6F0)
+    // Base Cream Tile Material (#FAF6F0) - Opaque & shared across normal empty slots
     const baseCreamMat = new THREE.MeshBasicMaterial({
       color: 0xFAF6F0,
       side: THREE.DoubleSide,
-      transparent: true,
       polygonOffset: true,
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1
@@ -98,23 +97,20 @@ export class TunnelManager {
 
     // Curated futuristic & architectural palettes for vibrant tile randomness
     const VIBRANT_PALETTE = [
-      0xF43F5E, // Rose Crimson / Hot Pink
-      0x0EA5E9, // Electric Sky Blue
-      0x8B5CF6, // Cyber Violet / Amethyst
-      0x10B981, // Emerald Green / Mint
-      0xF59E0B, // Amber Gold / Solar Orange
-      0x3B82F6, // Royal Azure Blue
-      0xEC4899, // Pink Flamingo
-      0x14B8A6, // Teal / Turquoise
-      0x6366F1, // Indigo Cyber
-      0xD97706, // Warm Bronze / Honey
-      0x334155, // Sleek Slate Charcoal (Dark accent!)
-      0x1E293B, // Deep Space Slate
-      0xE2E8F0, // Platinum Gray
-      0xFED7AA, // Pastel Peach
-      0xA5F3FC, // Ice Neon Blue
-      0xDDD6FE  // Lavender Mist
+      0xF43F5E, 0x0EA5E9, 0x8B5CF6, 0x10B981, 
+      0xF59E0B, 0x3B82F6, 0xEC4899, 0x14B8A6, 
+      0x6366F1, 0xD97706, 0x334155, 0x1E293B, 
+      0xE2E8F0, 0xFED7AA, 0xA5F3FC, 0xDDD6FE
     ];
+
+    // Pre-create shared material pool for all vibrant accent colors (avoids 140+ duplicates)
+    const vibrantMatPool = VIBRANT_PALETTE.map(color => new THREE.MeshBasicMaterial({
+      color: color,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1
+    }));
 
     // Grid offsets for 4 tiles per wall: [-3, -1, +1, +3]
     const offsets = [-3.0, -1.0, 1.0, 3.0];
@@ -199,20 +195,13 @@ export class TunnelManager {
     // Step 3: Construct all tile meshes in 3D space
     Object.values(wallTileSlots).forEach(slots => {
       slots.forEach(t => {
-        // Create an attractive fallback empty material (~38% chance of vibrant accent, ~62% cream)
+        // Assign shared material references instead of cloning
         let emptyMat;
-        if (Math.random() < 0.19) {
-          const randColor = VIBRANT_PALETTE[Math.floor(Math.random() * VIBRANT_PALETTE.length)];
-          emptyMat = new THREE.MeshBasicMaterial({
-            color: randColor,
-            side: THREE.DoubleSide,
-            transparent: true,
-            polygonOffset: true,
-            polygonOffsetFactor: 1,
-            polygonOffsetUnits: 1
-          });
+        if (Math.random() < 0.19 && vibrantMatPool.length > 0) {
+          const randIdx = Math.floor(Math.random() * vibrantMatPool.length);
+          emptyMat = vibrantMatPool[randIdx];
         } else {
-          emptyMat = baseCreamMat.clone();
+          emptyMat = baseCreamMat;
         }
 
         let mat;
@@ -326,14 +315,20 @@ export class TunnelManager {
         mesh.material = mesh.userData.initialMat;
         mesh.userData.isCard = mesh.userData.initialIsCard;
       }
-      mesh.material.opacity = 1;
+      if (mesh.material && mesh.material.transparent) {
+        mesh.material.opacity = 1;
+      }
+    });
+
+    this.seamLines.forEach(line => {
+      line.visible = true;
     });
   }
 
   clearTunnel() {
-    // Remove all planes
+    // Remove all planes from whatever parent group they belong to
     this.allPlanes.forEach(mesh => {
-      this.tunnelGroup.remove(mesh);
+      if (mesh.parent) mesh.parent.remove(mesh);
       if (mesh.geometry) mesh.geometry.dispose();
       if (mesh.material) mesh.material.dispose();
       // Dispose edges
@@ -347,7 +342,7 @@ export class TunnelManager {
 
     // Remove seam lines
     this.seamLines.forEach(line => {
-      this.tunnelGroup.remove(line);
+      if (line.parent) line.parent.remove(line);
       if (line.geometry) line.geometry.dispose();
       if (line.material) line.material.dispose();
     });

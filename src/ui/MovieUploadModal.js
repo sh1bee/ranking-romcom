@@ -98,11 +98,32 @@ export class MovieUploadModal {
   }
 
   attachEvents() {
+    // Ngăn chặn trôi sự kiện bấm nhầm (click throughput / event leakage) xuống scene 3D phía sau
+    ['mousedown', 'mouseup', 'click', 'touchstart', 'touchend'].forEach(evt => {
+      this.content.addEventListener(evt, (e) => {
+        e.stopPropagation();
+        // Cực kỳ quan trọng: khi người dùng buông nút chuột ngay bên trong hộp thoại Modal,
+        // do đã stopPropagation nên window sẽ không nghe thấy event mouseup/touchend.
+        // Ta buộc phải gọi thẳng endDrag() tại đây để nhả ảnh ra, chấm dứt thao tác kéo!
+        if (evt === 'mouseup' || evt === 'touchend') {
+          this.endDrag();
+        }
+      });
+    });
+
+    if (this.cropperImg) {
+      this.cropperImg.setAttribute('draggable', 'false');
+      this.cropperImg.addEventListener('dragstart', (e) => e.preventDefault());
+    }
+
     this.cancelBtn.addEventListener('click', () => this.close());
     this.backdrop.addEventListener('click', () => this.close());
     
     // File upload handling
-    this.dropzone.addEventListener('click', () => this.fileInput.click());
+    this.dropzone.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.fileInput.click();
+    });
     
     this.fileInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
@@ -142,6 +163,8 @@ export class MovieUploadModal {
     
     window.addEventListener('mouseup', () => this.endDrag());
     window.addEventListener('touchend', () => this.endDrag());
+    this.wrapper.addEventListener('mouseup', () => this.endDrag());
+    this.wrapper.addEventListener('touchend', () => this.endDrag());
 
     this.submitBtn.addEventListener('click', () => {
       const title = this.titleInput.value.trim();
