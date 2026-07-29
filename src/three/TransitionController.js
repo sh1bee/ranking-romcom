@@ -30,9 +30,11 @@ export class TransitionController {
     this.baseTileSpacing = 2.35; // Space between tiles horizontally
     this.baseTileScale = 1.05; // Proportioned to leave a clean gap between rows without colliding
 
-    // Shockwave ring pool for reverse transition VFX
-    this.shockwaveRings = [];
     this.scrollY = 0;
+    this.touchStartY = 0;
+    this.touchLastY = 0;
+    this.touchVelocity = 0;
+    this.momentumRaf = null;
 
     this.createOverlays();
 
@@ -53,27 +55,88 @@ export class TransitionController {
       const maxScroll = this.getMaxScrollY();
       if (maxScroll <= 0) return;
 
-      this.scrollY -= e.deltaY * 0.008;
+      this.scrollY += e.deltaY * 0.008;
       this.scrollY = THREE.MathUtils.clamp(this.scrollY, 0, maxScroll);
       this.applyScroll();
+    }, { passive: true });
+
+    // Touch scroll for mobile
+    let touchScrollActive = false;
+    window.addEventListener('touchstart', (e) => {
+      if (!this.isTransitioned || this.isAnimating) return;
+      const detailsModal = document.querySelector('.movie-details-modal');
+      const uploadModal = document.querySelector('.movie-modal-wrapper');
+      if ((detailsModal && detailsModal.style.display !== 'none') || (uploadModal && uploadModal.style.display !== 'none')) return;
+      // Don't scroll if touching UI elements
+      if (e.target.closest('.overlay-header, .overlay-tier-badge, .overlay-add-btn, .reset-btn')) return;
+      
+      if (this.momentumRaf) { cancelAnimationFrame(this.momentumRaf); this.momentumRaf = null; }
+      this.touchStartY = e.touches[0].clientY;
+      this.touchLastY = this.touchStartY;
+      this.touchVelocity = 0;
+      touchScrollActive = true;
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      if (!touchScrollActive || !this.isTransitioned || this.isAnimating) return;
+      const currentY = e.touches[0].clientY;
+      const deltaY = this.touchLastY - currentY;
+      this.touchVelocity = deltaY;
+      this.touchLastY = currentY;
+      
+      const maxScroll = this.getMaxScrollY();
+      if (maxScroll <= 0) return;
+      
+      this.scrollY += deltaY * 0.015;
+      this.scrollY = THREE.MathUtils.clamp(this.scrollY, 0, maxScroll);
+      this.applyScroll();
+    }, { passive: true });
+
+    window.addEventListener('touchend', () => {
+      if (!touchScrollActive) return;
+      touchScrollActive = false;
+      
+      // Momentum scrolling
+      const startVelocity = this.touchVelocity;
+      if (Math.abs(startVelocity) < 1) return;
+      
+      let velocity = startVelocity * 0.5;
+      const decelerate = () => {
+        velocity *= 0.92;
+        if (Math.abs(velocity) < 0.1) { this.momentumRaf = null; return; }
+        
+        const maxScroll = this.getMaxScrollY();
+        if (maxScroll <= 0) { this.momentumRaf = null; return; }
+        
+        this.scrollY += velocity * 0.015;
+        this.scrollY = THREE.MathUtils.clamp(this.scrollY, 0, maxScroll);
+        this.applyScroll();
+        this.momentumRaf = requestAnimationFrame(decelerate);
+      };
+      this.momentumRaf = requestAnimationFrame(decelerate);
     }, { passive: true });
   }
 
   createOverlays() {
-    // White flash
-    this.flash = document.createElement('div');
-    this.flash.className = 'screen-flash';
-    document.body.appendChild(this.flash);
-
-    // Vignette
+    // Vignette for cinematic atmospheric depth
     this.vignette = document.createElement('div');
     this.vignette.className = 'screen-vignette';
     document.body.appendChild(this.vignette);
 
-    // Speed lines overlay for reverse transition
-    this.speedLines = document.createElement('div');
-    this.speedLines.className = 'screen-speed-lines';
-    document.body.appendChild(this.speedLines);
+    // Smooth dimensional warp distortion
+    this.warp = document.createElement('div');
+    this.warp.className = 'screen-warp-distortion';
+    document.body.appendChild(this.warp);
+
+    // Gentle motion blur pulse during acceleration
+    this.motionBlur = document.createElement('div');
+    this.motionBlur.className = 'screen-motion-blur';
+    document.body.appendChild(this.motionBlur);
+
+    // Dark depth fade for seamless background transitions (zero white flash)
+    this.depthFade = document.createElement('div');
+    this.depthFade.className = 'screen-depth-fade';
+    document.body.appendChild(this.depthFade);
   }
 
   /**
@@ -112,8 +175,9 @@ export class TransitionController {
     const vHeight = 2 * distance * Math.tan(fovRad / 2);
     const pixelToUnit = vHeight / window.innerHeight;
 
-    // Position immediately adjacent to the HTML tier badge and add '+' button (~145px from edge)
-    return leftX + 145 * pixelToUnit + (this.baseTileScale * 1.0);
+    // Responsive offset: smaller on mobile
+    const labelOffset = window.innerWidth < 600 ? 90 : 145;
+    return leftX + labelOffset * pixelToUnit + (this.getResponsiveTileScale() * 1.0);
   }
 
   getItemsPerRow() {
@@ -121,8 +185,22 @@ export class TransitionController {
     const startX = this.getGridStartX();
     const rightEdge = (vWidth / 2) - 0.6; // Margin from right edge of screen
     const availableWidth = Math.max(1, rightEdge - startX);
-    const cols = Math.floor(availableWidth / this.baseTileSpacing) + 1;
-    return Math.max(4, cols); // Responsive: expands to fill large monitors!
+    const cols = Math.floor(availableWidth / this.getResponsiveTileSpacing()) + 1;
+    // Responsive min columns
+    const minCols = window.innerWidth < 600 ? 2 : (window.innerWidth < 900 ? 3 : 4);
+    return Math.max(minCols, cols);
+  }
+
+  getResponsiveTileScale() {
+    if (window.innerWidth < 480) return 0.78;
+    if (window.innerWidth < 600) return 0.85;
+    return this.baseTileScale;
+  }
+
+  getResponsiveTileSpacing() {
+    if (window.innerWidth < 480) return 1.7;
+    if (window.innerWidth < 600) return 1.85;
+    return this.baseTileSpacing;
   }
 
   recalculateRowPositions() {
@@ -180,7 +258,7 @@ export class TransitionController {
    * Always maintain uniform size and spacing. When exceeding 8 slots, items wrap onto new rows.
    */
   getRowLayout(tileCount) {
-    return { spacing: this.baseTileSpacing, scale: this.baseTileScale };
+    return { spacing: this.getResponsiveTileSpacing(), scale: this.getResponsiveTileScale() };
   }
 
   startTransition(onOverlayReady) {
@@ -189,47 +267,10 @@ export class TransitionController {
 
     const camera = this.threeSetup.camera;
 
-    // ═══════════════════════════════════════════════════════════════════
-    // PHASE 1 — WARP CLIMAX (0s – 0.5s)
-    //   During this 0.5s high-speed warp, NO tiles are detached yet so that
-    //   TunnelManager object pooling recycles all rings without leaving any gap!
-    // ═══════════════════════════════════════════════════════════════════
-    const phase1 = gsap.timeline({
-      onComplete: () => {
-        this._executePhase2To5(onOverlayReady);
-      }
-    });
-
-    phase1.to(this.tunnelManager, {
-      currentSpeed: 4.5,
-      duration: 0.4,
-      ease: 'power4.in'
-    }, 0);
-
-    phase1.to(camera, {
-      fov: 110,
-      duration: 0.5,
-      ease: 'power3.in',
-      onUpdate: () => camera.updateProjectionMatrix()
-    }, 0);
-
-    phase1.to(this.vignette, {
-      opacity: 0.6,
-      duration: 0.4,
-      ease: 'power2.in'
-    }, 0);
-
-    return phase1;
-  }
-
-  _executePhase2To5(onOverlayReady) {
-    const camera = this.threeSetup.camera;
-
-    // Now that the camera has reached its sudden stop, we select the 48 nearest tiles
-    // right in front of the camera and detach them for the explosion!
+    // 1. Select transition planes right at start (t = 0)
     const planes = this.getTransitionPlanes();
 
-    // Ensure all movies (isCard === true) are included in the transition planes!
+    // Ensure all movie cards are included
     const allCards = this.tunnelManager.allPlanes.filter(p => p.userData.isCard);
     allCards.forEach(cardPlane => {
       if (!planes.includes(cardPlane)) {
@@ -251,8 +292,6 @@ export class TransitionController {
           cardPlane.userData.cardInfo = tempCardInfo;
           cardPlane.userData.initialIsCard = tempInitialIsCard;
         } else {
-          // Khi tier có hơn 8 phim (không còn ô rỗng trong cụm 8 ô đầu của wall để hoán đổi),
-          // mang trực tiếp thẻ phim này từ dưới hầm lên tham gia vào cụm bay ra bảng Ranking!
           planes.push(cardPlane);
         }
       }
@@ -261,22 +300,10 @@ export class TransitionController {
     this.transitionPlanes = planes;
     const hidePlanes = this.tunnelManager.allPlanes.filter(p => !planes.includes(p));
 
-    // Tách (clone) material của 48 tấm ngói chuyển lên Ranking Board để khi làm mờ hầm, ngói trên board không bị suy giảm opacity do dùng chung material
+    // Set isDetached for transition planes
     planes.forEach(p => {
-      if (p.material) p.material = p.material.clone();
-      if (p.userData.emptyMat) p.userData.emptyMat = p.userData.emptyMat.clone();
-      if (p.userData.initialMat) p.userData.initialMat = p.userData.initialMat.clone();
-      if (p.children) {
-        p.children.forEach(child => {
-          if (child.isLineSegments && child.material) {
-            child.material = child.material.clone();
-          }
-        });
-      }
+      p.userData.isDetached = true;
     });
-
-    const camZ = camera.position.z;
-    this.gridZ = camZ - 7.5; // Pushed further back to fit 6 rows
 
     const master = gsap.timeline({
       onComplete: () => {
@@ -286,36 +313,65 @@ export class TransitionController {
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 2 — TUNNEL SHATTER (0.0s – 0.9s)
+    // PHASE 1 — GRAVITATIONAL PULL & WARP DISTORTION (0.0s – 0.50s)
     // ═══════════════════════════════════════════════════════════════════
-
-    // Sudden stop
     master.to(this.tunnelManager, {
-      currentSpeed: 0, targetSpeed: 0,
-      duration: 0.15, ease: 'power4.out'
+      currentSpeed: 4.5,
+      duration: 0.50,
+      ease: 'power2.in'
     }, 0);
 
-    // WHITE FLASH
-    master.to(this.flash, { opacity: 0.85, duration: 0.08, ease: 'power4.in' }, 0);
-    master.to(this.flash, { opacity: 0, duration: 0.8, ease: 'power2.out' }, 0.08);
+    master.to(camera, {
+      fov: 105,
+      duration: 0.50,
+      ease: 'power2.inOut',
+      onUpdate: () => camera.updateProjectionMatrix()
+    }, 0);
 
-    // CAMERA SHAKE
-    const shakeTimeline = gsap.timeline();
-    const camOrigX = camera.position.x, camOrigY = camera.position.y;
-    for (let i = 0; i < 8; i++) {
-      const intensity = (8 - i) * 0.04;
-      shakeTimeline.to(camera.position, {
-        x: camOrigX + (Math.random() - 0.5) * intensity,
-        y: camOrigY + (Math.random() - 0.5) * intensity,
-        duration: 0.04, ease: 'none'
-      });
-    }
-    shakeTimeline.to(camera.position, { x: camOrigX, y: camOrigY, duration: 0.05 });
-    master.add(shakeTimeline, 0);
+    // Smooth atmospheric camera banking (barrel roll tilt)
+    master.to(camera.rotation, {
+      z: 0.12,
+      x: 0.04,
+      duration: 0.50,
+      ease: 'power2.inOut'
+    }, 0);
 
-    // Hướng tiếp cận hoàn toàn mới (0 Lag - 60 FPS): Hút sâu background hầm về điểm kỳ dị ở cuối hầm (Warp-out Implosion)
-    // Thay vì làm mờ opacity trên 1400+ vật thể gây quá tải Alpha Blending và CPU sorting, ta gom toàn bộ phần sau của hầm
-    // vào 1 Group duy nhất và hút tốc độ cao vào điểm kỳ dị trong lén lút lúc màn hình trắng sáng nổ ra.
+    master.to(this.vignette, {
+      opacity: 0.65,
+      duration: 0.45,
+      ease: 'power2.out'
+    }, 0);
+
+    master.to(this.warp, {
+      opacity: 0.75,
+      duration: 0.45,
+      ease: 'power2.in'
+    }, 0.05);
+
+    master.to(this.motionBlur, {
+      opacity: 0.35,
+      duration: 0.50,
+      ease: 'power2.inOut'
+    }, 0);
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PHASE 2 — DIMENSIONAL COLLAPSE & SLINGSHOT (0.45s – 1.10s)
+    // ═══════════════════════════════════════════════════════════════════
+    const initialCamZ = camera.position.z;
+    const suddenStopZ = initialCamZ - 14;
+    this.gridZ = suddenStopZ - 6.5;
+
+    // Smooth deceleration instead of harsh sudden impact
+    master.to(this.tunnelManager, {
+      currentSpeed: 0, targetSpeed: 0,
+      duration: 0.45, ease: 'power3.out'
+    }, 0.45);
+
+    // Fade out distortion overlays smoothly
+    master.to(this.warp, { opacity: 0, duration: 0.65, ease: 'power2.out' }, 0.50);
+    master.to(this.motionBlur, { opacity: 0, duration: 0.50, ease: 'power2.out' }, 0.50);
+
+    // Gently dissolve unselected background architecture into deep space
     const bgGroup = new THREE.Group();
     this.tunnelManager.tunnelGroup.add(bgGroup);
     this.bgGroup = bgGroup;
@@ -323,96 +379,93 @@ export class TransitionController {
     hidePlanes.forEach(p => bgGroup.add(p));
     this.tunnelManager.seamLines.forEach(line => bgGroup.add(line));
 
-    // Animate HÚT SÂU background vào điểm kỳ dị (với vỏn vẹn 2 tweens trên 1 object duy nhất)
     master.to(bgGroup.position, {
-      z: -120, // Hút lùi về hố sâu vô tận
+      z: suddenStopZ - 40,
       duration: 0.85,
-      ease: 'power3.in'
-    }, 0.15);
+      ease: 'power2.out'
+    }, 0.45);
 
     master.to(bgGroup.scale, {
-      x: 0.001,
-      y: 0.001,
-      z: 0.001,
+      x: 0.05, y: 0.05, z: 0.05,
       duration: 0.85,
-      ease: 'power3.in'
-    }, 0.15);
+      ease: 'power2.out'
+    }, 0.45);
 
-    // Ẩn group nền ngay khi hút xong để trả lại 100% sức mạnh GPU cho Bảng Xếp Hạng
     master.call(() => {
       bgGroup.visible = false;
-    }, null, 1.0);
+    }, null, 1.35);
 
-    // Vignette fades out
-    master.to(this.vignette, { opacity: 0, duration: 0.6, ease: 'power2.out' }, 0.1);
-
-    // EXPLODE tiles outward by wall direction
-    planes.forEach((plane) => {
-      const wall = plane.userData.wallType;
-      plane.userData.isDetached = true;
-
-      const wallIdx = parseInt(wall.split('_')[1] || 0);
-      const angle = wallIdx * Math.PI / 3 + Math.PI / 2;
-      const force = 6 + Math.random() * 8;
+    // Gravitational Slingshot: Selected tiles pull inward briefly, then cast outward along elegant spiral arcs
+    const phi = (1 + Math.sqrt(5)) / 2;
+    planes.forEach((plane, i) => {
+      const goldenAngle = i * Math.PI * 2 * (1 - 1 / phi);
+      const distFromCenter = Math.sqrt(plane.position.x * plane.position.x + plane.position.y * plane.position.y);
+      const slingRadius = 3.2 + (i / planes.length) * 5.0 + Math.min(2.0, distFromCenter * 0.2);
       
-      const ex = Math.cos(angle) * force + (Math.random() - 0.5) * 4;
-      const ey = Math.sin(angle) * force + (Math.random() - 0.5) * 4;
+      const targetX = Math.cos(goldenAngle) * slingRadius;
+      const targetY = Math.sin(goldenAngle) * slingRadius;
 
+      // Stage 1: Gravitational pull toward axis
       master.to(plane.position, {
-        x: plane.position.x + ex,
-        y: plane.position.y + ey,
-        z: camZ - 8 + Math.random() * 4,
-        duration: 0.7, ease: 'power2.out'
-      }, 0.02 + Math.random() * 0.1);
+        x: plane.position.x * 0.35,
+        y: plane.position.y * 0.35,
+        z: suddenStopZ - 4,
+        duration: 0.35,
+        ease: 'power2.in'
+      }, 0.40 + (i % 5) * 0.015);
 
       master.to(plane.rotation, {
-        x: plane.rotation.x + (Math.random() - 0.5) * Math.PI * 2,
-        y: plane.rotation.y + (Math.random() - 0.5) * Math.PI * 2,
-        z: (Math.random() - 0.5) * Math.PI,
-        duration: 0.7, ease: 'power2.out'
-      }, 0.02 + Math.random() * 0.1);
+        x: Math.PI / 3,
+        y: Math.PI / 6,
+        z: goldenAngle + Math.PI / 4,
+        duration: 0.35,
+        ease: 'power2.inOut'
+      }, 0.40 + (i % 5) * 0.015);
+
+      // Stage 2: Slingshot outward to suspended orbital positions
+      master.to(plane.position, {
+        x: targetX,
+        y: targetY,
+        z: this.gridZ + 3.0 + (i % 6) * 0.5,
+        duration: 0.65,
+        ease: 'power3.out'
+      }, 0.75 + (i % 5) * 0.015);
+
+      master.to(plane.rotation, {
+        x: 0.2,
+        y: (Math.random() - 0.5) * 0.4,
+        z: goldenAngle * 0.3,
+        duration: 0.65,
+        ease: 'power3.out'
+      }, 0.75 + (i % 5) * 0.015);
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 3 — VORTEX REGROUP (0.8s – 2.0s)
+    // PHASE 3 — MAGNETIC ALIGNMENT & CAMERA GLIDE (1.00s – 1.80s)
     // ═══════════════════════════════════════════════════════════════════
-
-    // Camera pulls back to wide-angle board view
+    // Seamless camera positioning to wide ranking board view
     master.to(camera.position, {
       x: 0, y: 0, z: this.gridZ + this.boardDistance,
-      duration: 1.4, ease: 'power2.inOut'
-    }, 0.8);
+      duration: 1.35,
+      ease: 'power3.inOut'
+    }, 0.85);
+
+    master.to(camera.rotation, {
+      x: 0, y: 0, z: 0,
+      duration: 1.35,
+      ease: 'power3.inOut'
+    }, 0.85);
 
     master.to(camera, {
       fov: 42,
-      duration: 1.4,
-      ease: 'power2.inOut',
+      duration: 1.35,
+      ease: 'power3.inOut',
       onUpdate: () => camera.updateProjectionMatrix()
-    }, 0.8);
-
-    // Spiral mid-waypoints
-    planes.forEach((plane, i) => {
-      const delay = 0.9 + i * 0.015;
-      const angle = (i / planes.length) * Math.PI * 2;
-      const spiralR = 3 + Math.random() * 2;
-
-      master.to(plane.position, {
-        x: Math.cos(angle) * spiralR,
-        y: Math.sin(angle) * spiralR,
-        z: this.gridZ + 2,
-        duration: 0.6, ease: 'power2.in'
-      }, delay);
-
-      master.to(plane.rotation, {
-        x: 0, y: 0, z: 0,
-        duration: 0.8, ease: 'power2.inOut'
-      }, delay);
-    });
+    }, 0.85);
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 4 — GRID LOCK (2.0s – 3.0s)
+    // PHASE 4 — PRECISION GRID LOCK (1.60s – 2.55s)
     // ═══════════════════════════════════════════════════════════════════
-
     const rowMap = {
       wall_0: [], wall_1: [], wall_2: [], wall_3: [], wall_4: [], wall_5: []
     };
@@ -428,6 +481,7 @@ export class TransitionController {
     this.wallOrder.forEach((wType, tierIdx) => {
       const rowPlanes = this.rowMap[wType];
       
+      // Sort: movie cards first, then by depth
       rowPlanes.sort((a, b) => {
         const aCard = a.userData.isCard ? 1 : 0;
         const bCard = b.userData.isCard ? 1 : 0;
@@ -437,8 +491,8 @@ export class TransitionController {
 
       const startX = this.getGridStartX();
       const lineGap = 2.2;
-      const scale = this.baseTileScale;
-      const spacing = this.baseTileSpacing;
+      const scale = this.getResponsiveTileScale();
+      const spacing = this.getResponsiveTileSpacing();
       const itemsPerRow = this.getItemsPerRow();
       
       rowPlanes.forEach((plane, colIdx) => {
@@ -446,31 +500,40 @@ export class TransitionController {
         const colOnLine = colIdx % itemsPerRow;
         const targetX = startX + colOnLine * spacing;
         const targetY = this.rowYPositions[tierIdx] - lineIdx * lineGap;
-        const delay = 2.0 + tierIdx * 0.08 + colIdx * 0.03;
+        const delay = 1.60 + tierIdx * 0.09 + colIdx * 0.03;
 
         plane.userData.gridPos = { x: targetX, y: targetY, z: this.gridZ };
         plane.userData.gridScale = scale;
         plane.userData.gridRow = tierIdx;
 
+        // Smoothly settle orientation to perfectly flat planar view
+        master.to(plane.rotation, {
+          x: 0, y: 0, z: 0,
+          duration: 0.55,
+          ease: 'power2.out'
+        }, delay);
+
+        // Fluid precision lock with refined, subtle overshoot
         master.to(plane.position, {
           x: targetX, y: targetY, z: this.gridZ,
-          duration: 0.7, ease: 'back.out(1.2)'
+          duration: 0.70,
+          ease: 'back.out(1.25)'
         }, delay);
 
         master.to(plane.scale, {
           x: scale, y: scale, z: 1,
-          duration: 0.5, ease: 'power2.out'
-        }, delay + 0.1);
+          duration: 0.60,
+          ease: 'power2.out'
+        }, delay);
       });
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 5 — OVERLAY (2.9s – 3.3s)
+    // PHASE 5 — SYNCHRONIZED OVERLAY REVEAL (2.40s)
     // ═══════════════════════════════════════════════════════════════════
-
     master.call(() => {
       if (onOverlayReady) onOverlayReady();
-    }, null, 2.9);
+    }, null, 2.40);
 
     return master;
   }
@@ -571,8 +634,8 @@ export class TransitionController {
     this.recalculateRowPositions();
 
     const startX = this.getGridStartX();
-    const scale = this.baseTileScale;
-    const spacing = this.baseTileSpacing;
+    const scale = this.getResponsiveTileScale();
+    const spacing = this.getResponsiveTileSpacing();
     const itemsPerRow = this.getItemsPerRow();
     const newColIdx = rowPlanes.length - 1;
     const lineIdx = Math.floor(newColIdx / itemsPerRow);
@@ -605,8 +668,8 @@ export class TransitionController {
     this.recalculateRowPositions();
     const startX = this.getGridStartX();
     const lineGap = 2.2;
-    const scale = this.baseTileScale;
-    const spacing = this.baseTileSpacing;
+    const scale = this.getResponsiveTileScale();
+    const spacing = this.getResponsiveTileSpacing();
 
     this.wallOrder.forEach((wType, idx) => {
       const rowPlanes = this.rowMap[wType];
@@ -707,14 +770,50 @@ export class TransitionController {
     }
   }
 
+  /**
+   * Updates an existing tile's 3D card info & texture live on the board.
+   */
+  updateTile(movieData) {
+    if (!this.transitionPlanes) return;
+
+    const tile = this.transitionPlanes.find(
+      p => p.userData.isCard && p.userData.cardInfo && p.userData.cardInfo.id === movieData.id
+    );
+
+    if (tile) {
+      tile.userData.cardInfo = movieData;
+      const tex = createMovieTexture(movieData);
+      const newMat = new THREE.MeshBasicMaterial({
+        map: tex,
+        side: THREE.DoubleSide,
+        transparent: true,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1
+      });
+
+      // Dispose old material
+      if (tile.material && tile.material !== tile.userData.emptyMat) {
+        tile.material.dispose();
+      }
+      tile.material = newMat;
+
+      // Pop pulse feedback
+      const currentScale = tile.userData.gridScale || this.baseTileScale;
+      gsap.fromTo(tile.scale,
+        { x: currentScale * 1.15, y: currentScale * 1.15 },
+        { x: currentScale, y: currentScale, duration: 0.4, ease: 'back.out(2)' }
+      );
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════
-  //  REVERSE TRANSITION — Cinematic Re-entry into the Tunnel
+  //  REVERSE TRANSITION — Cinematic Re-entry into the Tunnel (Zero Flash)
   //
-  //  Phase R1 — PULSE WAVE: Ripple dissolves through the grid
-  //  Phase R2 — VORTEX IMPLOSION: Tiles spiral into tightening helix
-  //  Phase R3 — WARP TUNNEL: Camera plunges forward through speed lines
-  //             while tunnel walls materialize around the camera
-  //  Phase R4 — ARRIVAL: Flash clears, tunnel is restored, cruising
+  //  Phase R1 — ANTI-GRAVITY LIFT: Tiles softly uncouple and float upward
+  //  Phase R2 — SPIRAL CONVERGENCE: Tiles converge fluidly down tunnel centerline
+  //  Phase R3 — WORMHOLE TRANSIT: High-speed forward acceleration & eclipse fade
+  //  Phase R4 — EMERGENCE: Smooth emergence into restored cruising tunnel
   // ═══════════════════════════════════════════════════════════════════
 
   reverseTransition(onComplete) {
@@ -734,187 +833,154 @@ export class TransitionController {
       onComplete: () => {
         this.isAnimating = false;
         this.isTransitioned = false;
-        this.cleanupShockwaves();
-
-        if (onComplete) onComplete();
-
         if (onComplete) onComplete();
       }
     });
 
-    // ─── Phase R1 — PULSE WAVE (0s – 0.5s) ──────────────────────────
-    // Quick ripple-pulse through the grid rows to signal departure
-
+    // ─── Phase R1 — ANTI-GRAVITY LIFT (0s – 0.45s) ────
+    // Tiles uncouple and lift gently off the ranking grid toward camera with soft weightlessness
     this.wallOrder.forEach((wType, rowIdx) => {
-      const rowPlanes = this.rowMap[wType] || [];
+      const rowPlanes = this.rowMap && this.rowMap[wType] ? this.rowMap[wType] : [];
       rowPlanes.forEach((plane, colIdx) => {
-        const delay = rowIdx * 0.06 + colIdx * 0.015;
-        tl.to(plane.scale, {
-          x: 1.5, y: 1.5,
-          duration: 0.12,
-          ease: 'power2.out',
-          yoyo: true,
-          repeat: 1
+        const delay = rowIdx * 0.03 + colIdx * 0.012;
+        
+        tl.to(plane.position, {
+          z: this.gridZ + 2.8,
+          duration: 0.35,
+          ease: 'power2.out'
+        }, delay);
+
+        tl.to(plane.rotation, {
+          x: (Math.random() - 0.5) * 0.25,
+          y: (Math.random() - 0.5) * 0.25,
+          z: (Math.random() - 0.5) * 0.15,
+          duration: 0.35,
+          ease: 'power2.out'
         }, delay);
       });
     });
 
-    // ─── Phase R2 — VORTEX IMPLOSION (0.4s – 1.5s) ──────────────────
-    // All tiles spiral into a shrinking helix and vanish into singularity
-
-    // Vignette builds tension
     tl.to(this.vignette, {
-      opacity: 0.8,
-      duration: 0.6,
-      ease: 'power2.in'
-    }, 0.3);
+      opacity: 0.75,
+      duration: 0.45,
+      ease: 'power2.inOut'
+    }, 0.05);
 
+    // ─── Phase R2 — SPIRAL CONVERGENCE (0.35s – 1.15s) ─
+    // Smooth golden spiral convergence toward forward centerline
+    const phi = (1 + Math.sqrt(5)) / 2;
     planes.forEach((plane, i) => {
       const t_norm = i / total;
-      const delay = 0.4 + t_norm * 0.35;
-      const angle = t_norm * Math.PI * 6; // 3 full helix turns
-      const radius = 5 * (1 - t_norm * 0.7);
+      const delay = 0.35 + t_norm * 0.25;
+      const goldenAngle = i * Math.PI * 2 * (1 - 1 / phi) * 2;
+      const radius = 4.0 * (1 - t_norm * 0.75);
 
-      // Spiral waypoint
       tl.to(plane.position, {
-        x: Math.cos(angle) * radius,
-        y: Math.sin(angle) * radius,
-        z: this.gridZ - 3 - t_norm * 8,
-        duration: 0.6,
-        ease: 'power3.in'
+        x: Math.cos(goldenAngle) * radius,
+        y: Math.sin(goldenAngle) * radius,
+        z: this.gridZ - 5 - t_norm * 8,
+        duration: 0.50,
+        ease: 'power2.inOut'
       }, delay);
 
       tl.to(plane.rotation, {
-        z: `+=${Math.PI * 3}`,
-        duration: 0.6,
+        z: goldenAngle,
+        x: Math.PI / 2,
+        duration: 0.50,
         ease: 'power2.in'
       }, delay);
 
-      // Implode into center
-      tl.to(plane.position, {
-        x: 0, y: 0, z: this.gridZ - 14,
-        duration: 0.35,
-        ease: 'power4.in'
-      }, delay + 0.45);
-
+      // Smoothly scale down into the deep focal point (replaces material opacity fade for performance)
       tl.to(plane.scale, {
-        x: 0, y: 0,
-        duration: 0.35,
-        ease: 'power4.in'
-      }, delay + 0.45);
-
-      tl.to(plane.material, {
-        opacity: 0,
-        duration: 0.2,
-        ease: 'power2.in'
-      }, delay + 0.6);
+        x: 0, y: 0, z: 1.5,
+        duration: 0.40,
+        ease: 'power3.in'
+      }, delay + 0.20);
     });
 
-    // Shockwave rings at the singularity
-    tl.call(() => this.createShockwaveRings(3), null, 1.2);
+    // ─── Phase R3 — WORMHOLE TRANSIT (1.00s – 1.85s) ──
+    const warpStart = 1.05;
 
-    // Camera shake at implosion climax
-    const shakeTl = gsap.timeline();
-    for (let i = 0; i < 10; i++) {
-      const intensity = (10 - i) * 0.05;
-      shakeTl.to(camera.position, {
-        x: (Math.random() - 0.5) * intensity,
-        y: (Math.random() - 0.5) * intensity,
-        duration: 0.03, ease: 'none'
-      });
-    }
-    shakeTl.to(camera.position, { x: 0, y: 0, duration: 0.04 });
-    tl.add(shakeTl, 1.2);
-
-    // Short flash at implosion
-    tl.to(this.flash, { opacity: 0.7, duration: 0.06, ease: 'none' }, 1.25);
-    tl.to(this.flash, { opacity: 0, duration: 0.4, ease: 'power2.out' }, 1.32);
-
-    // ─── Phase R3 — WARP TUNNEL (1.5s – 3.0s) ───────────────────────
-    // Camera pulls back, FOV widens, speed lines activate.
-    // Tunnel walls fade in AROUND the camera while it's moving,
-    // creating the sensation of re-entering the tunnel at warp speed.
-
-    const warpStart = 1.5;
-
-    // Speed lines activate
-    tl.to(this.speedLines, {
-      opacity: 1,
-      duration: 0.3,
+    // Introduce smooth warp distortion & motion blur
+    tl.to(this.warp, {
+      opacity: 0.85,
+      duration: 0.35,
       ease: 'power2.in'
     }, warpStart);
 
-    // FOV blows out wide for warp sensation
+    tl.to(this.motionBlur, {
+      opacity: 0.45,
+      duration: 0.35,
+      ease: 'power2.inOut'
+    }, warpStart);
+
+    // Smooth forward camera dive & fov expansion
     tl.to(camera, {
-      fov: 120,
-      duration: 0.6,
+      fov: 115,
+      duration: 0.65,
       ease: 'power3.in',
       onUpdate: () => camera.updateProjectionMatrix()
     }, warpStart);
 
-    // Camera zooms forward dramatically
     tl.to(camera.position, {
       z: this.gridZ - 30,
-      duration: 0.7,
+      duration: 0.70,
       ease: 'power3.in'
     }, warpStart);
 
-    // Vignette goes full dark
-    tl.to(this.vignette, {
-      opacity: 1,
-      duration: 0.5,
+    // Eclipse depth fade (darkness instead of blinding white flash) to transition geometry
+    tl.to(this.depthFade, {
+      opacity: 0.95,
+      duration: 0.35,
       ease: 'power2.in'
-    }, warpStart + 0.2);
+    }, warpStart + 0.35);
 
-    // === THE KEY MOMENT: Reset behind a flash ===
-
-    // Full white flash as we "arrive"
-    tl.to(this.flash, { opacity: 1, duration: 0.1, ease: 'none' }, warpStart + 0.7);
-
-    // Behind the flash: reset everything
+    // Rebuild infinite tunnel seamlessly behind dark eclipse fade
     tl.call(() => {
       if (this.bgGroup && this.bgGroup.parent) {
         this.bgGroup.parent.remove(this.bgGroup);
         this.bgGroup = null;
       }
-      // Rebuild the tunnel in the background (will wrap around current camera Z)
       this.tunnelManager.rebuildTunnel();
-    }, null, warpStart + 0.8);
+    }, null, warpStart + 0.72);
 
-    // ─── Phase R4 — ARRIVAL (2.3s – 3.5s) ───────────────────────────
-    // Flash fades out gently, FOV eases back to 75,
-    // speed lines dissolve, tunnel is cruising.
+    // ─── Phase R4 — EMERGENCE & CRUISE LOCK (1.75s – 2.65s) ───
+    const arriveStart = warpStart + 0.75;
 
-    const arriveStart = warpStart + 0.8;
-
-    // FOV eases back to normal — this creates the "deceleration" feeling
+    // Decelerate camera FOV back to comfortable cruising 75
     tl.to(camera, {
       fov: 75,
-      duration: 1.2,
-      ease: 'power2.out',
+      duration: 0.95,
+      ease: 'power3.out',
       onUpdate: () => camera.updateProjectionMatrix()
     }, arriveStart);
 
-    // Flash fades out slowly to reveal the tunnel
-    tl.to(this.flash, {
+    // Gently dissolve dark depth fade to unveil the restored 3D tunnel
+    tl.to(this.depthFade, {
       opacity: 0,
-      duration: 1.0,
+      duration: 0.85,
       ease: 'power2.out'
     }, arriveStart);
 
-    // Speed lines fade
-    tl.to(this.speedLines, {
+    // Fade warp & motion overlays
+    tl.to(this.warp, {
       opacity: 0,
-      duration: 0.8,
+      duration: 0.75,
       ease: 'power2.out'
-    }, arriveStart + 0.1);
+    }, arriveStart + 0.05);
 
-    // Vignette recedes
+    tl.to(this.motionBlur, {
+      opacity: 0,
+      duration: 0.65,
+      ease: 'power2.out'
+    }, arriveStart);
+
+    // Dissolve vignette back to transparent
     tl.to(this.vignette, {
       opacity: 0,
-      duration: 1.0,
+      duration: 0.85,
       ease: 'power2.out'
-    }, arriveStart + 0.2);
+    }, arriveStart + 0.10);
 
     return tl;
   }
@@ -944,48 +1010,6 @@ export class TransitionController {
     if (this.transitionPlanes) {
       this.transitionPlanes = this.transitionPlanes.filter(p => !toRemove.includes(p));
     }
-  }
-
-  /**
-   * Creates expanding shockwave ring meshes at the singularity point
-   */
-  createShockwaveRings(count) {
-    const scene = this.tunnelManager.tunnelGroup;
-
-    for (let i = 0; i < count; i++) {
-      const ringGeo = new THREE.RingGeometry(0.1, 0.3, 64);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.8,
-        side: THREE.DoubleSide
-      });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.position.set(0, 0, this.gridZ - 14);
-
-      scene.add(ring);
-      this.shockwaveRings.push(ring);
-
-      const delay = i * 0.1;
-      gsap.to(ring.scale, {
-        x: 35 + i * 10, y: 35 + i * 10, z: 1,
-        duration: 0.7, ease: 'power2.out', delay
-      });
-      gsap.to(ringMat, {
-        opacity: 0,
-        duration: 0.6, ease: 'power2.out', delay: delay + 0.1
-      });
-    }
-  }
-
-  cleanupShockwaves() {
-    const scene = this.tunnelManager.tunnelGroup;
-    this.shockwaveRings.forEach(ring => {
-      scene.remove(ring);
-      ring.geometry.dispose();
-      ring.material.dispose();
-    });
-    this.shockwaveRings = [];
   }
 }
 

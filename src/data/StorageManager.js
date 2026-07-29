@@ -45,28 +45,26 @@ export class StorageManager {
       // 3. Load items from IndexedDB
       const dbMovies = await this._getAllFromDB();
       
-      // 4. Merge & Migrate between LocalStorage & IndexedDB
-      if (dbMovies.length > 0 || localData.length > 0) {
-        // Build a unique dictionary by ID to merge without duplicates
-        const map = new Map();
-        dbMovies.forEach(m => map.set(m.id, m));
-        localData.forEach(m => map.set(m.id, m)); // ensure recent or local items are preserved
-        
-        this._cache = Array.from(map.values());
-        
-        // Ensure IndexedDB is up to date with merged results
-        await this._saveAllToDB(this._cache);
-      }
+      // 4. Smart Merge & Migrate between LocalStorage, IndexedDB, and updated DEFAULT_ROMCOMS dataset
+      const map = new Map();
+      dbMovies.forEach(m => map.set(m.id, m));
+      localData.forEach(m => map.set(m.id, m)); // ensure recent or local items are preserved
 
-      // 5. Seed default romcom dataset if database is completely empty (first-time Vercel visitor!)
-      if (this._cache.length === 0) {
-        this._cache = [...DEFAULT_ROMCOMS];
-        await this._saveAllToDB(this._cache);
-        try {
-          localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this._cache));
-        } catch (e) {
-          console.warn('LocalStorage quota exceeded for seed data, using IndexedDB.');
+      // Auto-merge any newly added movies from code updates (DEFAULT_ROMCOMS) into browser storage
+      DEFAULT_ROMCOMS.forEach(m => {
+        if (!map.has(m.id)) {
+          map.set(m.id, m);
         }
+      });
+      
+      this._cache = Array.from(map.values());
+      
+      // Ensure IndexedDB and LocalStorage are up to date with merged results
+      await this._saveAllToDB(this._cache);
+      try {
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this._cache));
+      } catch (e) {
+        console.warn('LocalStorage quota exceeded during sync, saved in IndexedDB.');
       }
     } catch (err) {
       console.error('Failed to initialize IndexedDB, fallback to localStorage:', err);
@@ -99,6 +97,32 @@ export class StorageManager {
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'e') {
           e.preventDefault();
           window.exportDefaultRomcoms();
+        }
+      });
+
+      // Utility: Cho phép tải lại chính xác dữ liệu gốc trong defaultRomcoms.js (xác minh bản mới trên web live)
+      window.resetToDefault = async () => {
+        if (!confirm("⚡ Bạn có muốn tải lại chính xác bộ dữ liệu mặc định (defaultRomcoms.js) mới nhất không?")) return;
+        StorageManager._cache = [...DEFAULT_ROMCOMS];
+        if (StorageManager._db) {
+          try {
+            const transaction = StorageManager._db.transaction(StorageManager.STORE_NAME, 'readwrite');
+            const store = transaction.objectStore(StorageManager.STORE_NAME);
+            store.clear();
+            StorageManager._cache.forEach(m => store.put(m));
+          } catch (e) {}
+        }
+        try {
+          localStorage.setItem(StorageManager.STORAGE_KEY, JSON.stringify(StorageManager._cache));
+        } catch (e) {}
+        location.reload();
+      };
+
+      // Tổ hợp phím Option+Shift+R (hoặc Alt+Shift+R) để Khôi phục & Cập nhật danh sách gốc
+      window.addEventListener('keydown', (e) => {
+        if (e.altKey && e.shiftKey && e.key.toLowerCase() === 'r') {
+          e.preventDefault();
+          window.resetToDefault();
         }
       });
     }
@@ -177,6 +201,22 @@ export class StorageManager {
       return true;
     }
     return false;
+  }
+
+  static updateMovie(updatedMovie) {
+    const index = this._cache.findIndex(m => m.id === updatedMovie.id);
+    if (index !== -1) {
+      this._cache[index] = { ...this._cache[index], ...updatedMovie };
+    } else {
+      this._cache.push(updatedMovie);
+    }
+    this._saveAllToDB(this._cache).catch(err => console.error(err));
+    try {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this._cache));
+    } catch (e) {
+      console.warn('LocalStorage quota exceeded during update fallback, ignoring.');
+    }
+    return true;
   }
 
   /**

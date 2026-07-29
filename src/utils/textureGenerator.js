@@ -6,8 +6,9 @@ import * as THREE from 'three';
  * @returns {THREE.CanvasTexture}
  */
 export function createCardTexture(card) {
-  const width = 512;
-  const height = 512;
+  const isMobile = window.innerWidth < 768;
+  const width = isMobile ? 256 : 512;
+  const height = isMobile ? 256 : 512;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -30,8 +31,9 @@ export function createCardTexture(card) {
 }
 
 export function createMovieTexture(movie) {
-  const width = 512;
-  const height = 512;
+  const isMobile = window.innerWidth < 768;
+  const width = isMobile ? 256 : 512;
+  const height = isMobile ? 256 : 512;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;

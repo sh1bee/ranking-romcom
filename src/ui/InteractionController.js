@@ -15,6 +15,8 @@ export class InteractionController {
     
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
+    this.touchStartPos = null;
+    this.isTouchDevice = false;
 
     this.initUI();
     this.attachEvents();
@@ -53,43 +55,85 @@ export class InteractionController {
   }
 
   attachEvents() {
-    const handleStart = (e) => {
+    // --- Desktop mouse events ---
+    const handleMouseDown = (e) => {
+      if (this.isTouchDevice) return;
       if (this.isModalOpen()) return;
-      // Ignore if clicking UI elements (overlay buttons, tier badges, etc.)
       if (e.target.closest('.reset-btn, .overlay-add-btn, .overlay-tier-badge, .overlay-header, .movie-details-modal, .movie-modal-wrapper')) return;
       
-      // If we are on the ranking board (hasTriggered is true), check for clicks on tiles
       if (this.hasTriggered) {
         this.handleBoardClick(e);
         return;
       }
-      
       this.startWarp();
     };
 
-    const handleEnd = (e) => {
+    const handleMouseUp = (e) => {
+      if (this.isTouchDevice) return;
       if (this.hasTriggered) return;
       if (this.isHolding) {
         this.triggerTransition();
       }
     };
 
-    const handleMove = (e) => {
+    const handleMouseMove = (e) => {
+      if (this.isTouchDevice) return;
       if (!this.hasTriggered) return;
       this.handleBoardHover(e);
     };
 
-    // Attach to window so holding anywhere on viewport triggers warp
-    window.addEventListener('mousedown', handleStart);
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
 
-    window.addEventListener('touchstart', handleStart, { passive: true });
-    window.addEventListener('touchmove', handleMove, { passive: true });
-    window.addEventListener('touchend', handleEnd, { passive: true });
+    // --- Touch events with tap vs drag disambiguation ---
+    window.addEventListener('touchstart', (e) => {
+      this.isTouchDevice = true;
+      if (this.isModalOpen()) return;
+      if (e.target.closest('.reset-btn, .overlay-add-btn, .overlay-tier-badge, .overlay-header, .movie-details-modal, .movie-modal-wrapper')) return;
+
+      const touch = e.touches[0];
+      this.touchStartPos = { x: touch.clientX, y: touch.clientY };
+
+      if (!this.hasTriggered) {
+        this.startWarp();
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      // Mark as dragging if displacement exceeds threshold
+      if (this.touchStartPos) {
+        const touch = e.touches[0];
+        const dx = touch.clientX - this.touchStartPos.x;
+        const dy = touch.clientY - this.touchStartPos.y;
+        if (Math.hypot(dx, dy) > 10) {
+          this.touchStartPos = null; // Nullify to indicate drag, not tap
+        }
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchend', (e) => {
+      if (this.hasTriggered) {
+        // Only handle as tap if touchStartPos is still set (displacement < 10px)
+        if (this.touchStartPos) {
+          this.handleBoardClick(e);
+        }
+        this.touchStartPos = null;
+        return;
+      }
+
+      // Tunnel warp: trigger transition on release
+      if (this.isHolding) {
+        this.triggerTransition();
+      }
+      this.touchStartPos = null;
+    }, { passive: true });
   }
 
   handleBoardHover(event) {
+    // Disable hover pop-out on touch devices — only desktop mouse
+    if (this.isTouchDevice) return;
+
     let clientX, clientY;
     if (event.changedTouches && event.changedTouches.length > 0) {
       clientX = event.changedTouches[0].clientX;

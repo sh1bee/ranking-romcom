@@ -19,24 +19,45 @@ export class TierListUI {
       this.transitionCtrl.onLayoutChange = () => this.updatePositions();
     }
 
-    // Initialize Modal
-    this.uploadModal = new MovieUploadModal(document.body, (movieData) => {
-      // Save to localStorage
-      StorageManager.saveMovie(movieData);
-      
-      // Add to 3D board
-      const tierIndex = Object.keys(TIER_CONFIG).indexOf(movieData.tier);
-      this.transitionCtrl.addTileToRow(tierIndex, movieData);
+    // Initialize Modal (supports both add and edit)
+    this.uploadModal = new MovieUploadModal(document.body, (movieData, isEdit) => {
+      if (isEdit) {
+        // Save update to storage
+        StorageManager.updateMovie(movieData);
+        
+        // Live update 3D tile
+        if (this.transitionCtrl) {
+          this.transitionCtrl.updateTile(movieData);
+        }
+      } else {
+        // Save new movie to storage
+        StorageManager.saveMovie(movieData);
+        
+        // Add to 3D board
+        const tierIndex = Object.keys(TIER_CONFIG).indexOf(movieData.tier);
+        if (this.transitionCtrl) {
+          this.transitionCtrl.addTileToRow(tierIndex, movieData);
+        }
+      }
     });
 
     // Details Modal
-    this.detailsModal = new MovieDetailsModal(document.body, (cardInfo) => {
-      // 1. Delete from localStorage
-      StorageManager.deleteMovie(cardInfo.id);
-      
-      // 2. Remove from the 3D board
-      this.transitionCtrl.removeTile(cardInfo.id);
-    });
+    this.detailsModal = new MovieDetailsModal(
+      document.body,
+      (cardInfo) => {
+        // 1. Delete from storage
+        StorageManager.deleteMovie(cardInfo.id);
+        
+        // 2. Remove from the 3D board
+        if (this.transitionCtrl) {
+          this.transitionCtrl.removeTile(cardInfo.id);
+        }
+      },
+      (cardInfo) => {
+        // Edit movie callback: opens upload modal pre-populated with existing movie data
+        this.uploadModal.open(cardInfo.tier, cardInfo);
+      }
+    );
 
     this.build();
   }
@@ -62,7 +83,7 @@ export class TierListUI {
         </div>
         <button id="resetBtn" class="reset-btn">
           <span class="reset-icon">↻</span>
-          RE-ENTER TUNNEL
+          <span class="reset-text">RE-ENTER TUNNEL</span>
         </button>
       </header>
       <div class="overlay-labels" id="overlayLabels"></div>

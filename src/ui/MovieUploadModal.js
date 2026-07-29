@@ -16,7 +16,7 @@ export class MovieUploadModal {
     
     this.wrapper.innerHTML = `
       <div class="movie-modal-backdrop"></div>
-      <div class="movie-modal-content">
+      <div class="movie-modal-content" style="max-height:90dvh; max-height:90vh; overflow-y:auto; -webkit-overflow-scrolling:touch;">
         <h2 class="modal-title">ADD MOVIE TO <span id="modal-tier-badge"></span> TIER</h2>
         
         <div class="modal-body">
@@ -71,6 +71,7 @@ export class MovieUploadModal {
     this.cropperZoom = this.wrapper.querySelector('#cropper-zoom');
     this.cropperReselect = this.wrapper.querySelector('#cropper-reselect');
 
+    this.modalTitleEl = this.wrapper.querySelector('.modal-title');
     this.titleInput = this.wrapper.querySelector('#modal-title-input');
     this.reviewInput = this.wrapper.querySelector('#modal-review-input');
     
@@ -102,9 +103,6 @@ export class MovieUploadModal {
     ['mousedown', 'mouseup', 'click', 'touchstart', 'touchend'].forEach(evt => {
       this.content.addEventListener(evt, (e) => {
         e.stopPropagation();
-        // Cực kỳ quan trọng: khi người dùng buông nút chuột ngay bên trong hộp thoại Modal,
-        // do đã stopPropagation nên window sẽ không nghe thấy event mouseup/touchend.
-        // Ta buộc phải gọi thẳng endDrag() tại đây để nhả ảnh ra, chấm dứt thao tác kéo!
         if (evt === 'mouseup' || evt === 'touchend') {
           this.endDrag();
         }
@@ -187,11 +185,11 @@ export class MovieUploadModal {
       }
 
       const movieData = {
-        id: 'movie_' + Date.now(),
+        id: this.editingMovie ? this.editingMovie.id : ('movie_' + Date.now()),
         tier: this.currentTier,
         title: title,
         review: this.reviewInput.value.trim(),
-        image: this.currentImageData || null,
+        image: this.currentImageData || (this.editingMovie ? this.editingMovie.image : null),
         crop: {
           x: normX,
           y: normY,
@@ -199,7 +197,7 @@ export class MovieUploadModal {
         }
       };
 
-      this.onSubmit(movieData);
+      this.onSubmit(movieData, !!this.editingMovie);
       this.close();
     });
   }
@@ -208,7 +206,6 @@ export class MovieUploadModal {
 
   initCropper(imgElement) {
     const imgAspect = imgElement.naturalWidth / imgElement.naturalHeight;
-    // Base width/height ensures the image completely covers the 200x200 viewport at zoom=1
     if (imgAspect > 1) {
       this.cropState.baseHeight = this.cropState.vpSize;
       this.cropState.baseWidth = this.cropState.vpSize * imgAspect;
@@ -230,7 +227,6 @@ export class MovieUploadModal {
     const scaledW = state.baseWidth * state.zoom;
     const scaledH = state.baseHeight * state.zoom;
     
-    // Max offset so the image doesn't reveal the viewport background
     const maxX = Math.max(0, (scaledW - state.vpSize) / 2);
     const maxY = Math.max(0, (scaledH - state.vpSize) / 2);
     
@@ -267,27 +263,76 @@ export class MovieUploadModal {
     this.cropState.isDragging = false;
   }
 
-  open(tierKey) {
+  open(tierKey, existingMovie = null) {
     this.currentTier = tierKey;
-    this.tierBadge.textContent = tierKey;
-    
-    // Reset form
-    this.titleInput.value = '';
-    this.reviewInput.value = '';
-    this.fileInput.value = '';
-    this.currentImageData = null;
-    
-    this.dropzone.style.display = 'flex';
-    this.cropperContainer.style.display = 'none';
-    this.cropperImg.src = '';
-    
-    // Reset crop state
-    this.cropState.currentX = 0;
-    this.cropState.currentY = 0;
-    this.cropState.zoom = 1;
-    this.cropperZoom.value = 1;
+    this.editingMovie = existingMovie;
+
+    if (existingMovie) {
+      if (this.modalTitleEl) {
+        this.modalTitleEl.innerHTML = `EDIT MOVIE IN <span id="modal-tier-badge">${tierKey}</span> TIER`;
+      }
+      this.submitBtn.textContent = 'SAVE CHANGES';
+
+      this.titleInput.value = existingMovie.title || '';
+      this.reviewInput.value = existingMovie.review || '';
+      this.fileInput.value = '';
+      this.currentImageData = existingMovie.image || null;
+
+      if (existingMovie.image) {
+        this.dropzone.style.display = 'none';
+        this.cropperContainer.style.display = 'flex';
+        this.cropperImg.onload = () => {
+          this.initCropper(this.cropperImg);
+          if (existingMovie.crop) {
+            this.cropState.zoom = existingMovie.crop.zoom || 1;
+            this.cropperZoom.value = this.cropState.zoom;
+            this.updateCropper();
+          }
+        };
+        this.cropperImg.src = existingMovie.image;
+      } else {
+        this.dropzone.style.display = 'flex';
+        this.cropperContainer.style.display = 'none';
+        this.cropperImg.src = '';
+      }
+    } else {
+      if (this.modalTitleEl) {
+        this.modalTitleEl.innerHTML = `ADD MOVIE TO <span id="modal-tier-badge">${tierKey}</span> TIER`;
+      }
+      this.submitBtn.textContent = 'ADD TO RANKING';
+
+      // Reset form
+      this.titleInput.value = '';
+      this.reviewInput.value = '';
+      this.fileInput.value = '';
+      this.currentImageData = null;
+      
+      this.dropzone.style.display = 'flex';
+      this.cropperContainer.style.display = 'none';
+      this.cropperImg.src = '';
+      
+      // Reset crop state
+      this.cropState.currentX = 0;
+      this.cropState.currentY = 0;
+      this.cropState.zoom = 1;
+      this.cropperZoom.value = 1;
+    }
 
     this.wrapper.style.display = 'flex';
+    
+    // Handle mobile keyboard resize
+    if (window.visualViewport) {
+      // Clean up previous listener if open() called multiple times
+      if (this._vpHandler) {
+        window.visualViewport.removeEventListener('resize', this._vpHandler);
+      }
+      this._vpHandler = () => {
+        if (this.wrapper.style.display !== 'none') {
+          this.content.style.maxHeight = `${window.visualViewport.height * 0.9}px`;
+        }
+      };
+      window.visualViewport.addEventListener('resize', this._vpHandler);
+    }
     
     gsap.fromTo(this.wrapper, 
       { opacity: 0 }, 
@@ -305,6 +350,11 @@ export class MovieUploadModal {
       duration: 0.3,
       onComplete: () => {
         this.wrapper.style.display = 'none';
+        if (this._vpHandler && window.visualViewport) {
+          window.visualViewport.removeEventListener('resize', this._vpHandler);
+          this._vpHandler = null;
+        }
+        this.content.style.maxHeight = '';
       }
     });
     gsap.to(this.content, {

@@ -14,7 +14,7 @@ export class TunnelManager {
     this.tunnelApothem = 4.0 * Math.sqrt(3); 
     this.tileSize = 2.0; 
     this.planeGap = 2.0; 
-    this.numRings = 32; 
+    this.numRings = window.innerWidth < 768 ? 48 : 72; // Fewer rings on mobile for performance
 
     // Speed states
     this.baseSpeed = 0.18;
@@ -72,8 +72,8 @@ export class TunnelManager {
 
     corners.forEach(([cx, cy]) => {
       const geo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(cx, cy, 5),
-        new THREE.Vector3(cx, cy, -cornerDepth)
+        new THREE.Vector3(cx, cy, 20),
+        new THREE.Vector3(cx, cy, -250)
       ]);
       const line = new THREE.Line(geo, lineMat);
       this.seamLines.push(line);
@@ -350,29 +350,14 @@ export class TunnelManager {
   }
 
   rebuildTunnel() {
-    const currentCamZ = this.camera.position.z;
+    // Seamlessly reset camera back to coordinate origin behind the opaque white flash
+    this.camera.position.set(0, 0, 0);
 
     this.clearTunnel();
     this.buildReferenceTunnel();
     this.buildCornerSeamLines();
 
-    // Do NOT reset the camera position. Let it continue from where it is.
-    // Wrap the newly created planes (which are at 0, -2, -4) to loop correctly around currentCamZ
-    const recycleThreshold = currentCamZ + 4;
-    const totalTunnelDepth = this.numRings * this.planeGap;
-
-    this.allPlanes.forEach(plane => {
-      while (plane.position.z > recycleThreshold) {
-        plane.position.z -= totalTunnelDepth;
-      }
-    });
-
-    // Shift seam lines so they infinitely extend from the camera's perspective
-    this.seamLines.forEach(line => {
-      line.position.z = currentCamZ;
-    });
-
-    // Resume movement immediately
+    // Resume movement immediately from origin
     this.currentSpeed = this.baseSpeed;
     this.targetSpeed = this.baseSpeed;
     this.isWarping = false;
