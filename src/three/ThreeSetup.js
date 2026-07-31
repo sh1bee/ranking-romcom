@@ -6,13 +6,27 @@ export class ThreeSetup {
     this.width = this.container.clientWidth || window.innerWidth;
     this.height = this.container.clientHeight || window.innerHeight;
 
-    // Warm off-white background matching reference image (#F2ECE4)
-    const bgColor = new THREE.Color('#F2ECE4');
+    // Theme listener for background/fog
+    const updateTheme = (isDark) => {
+      const colorHex = isDark ? '#0A0A0F' : '#F2ECE4';
+      const bgColor = new THREE.Color(colorHex);
+      this.scene.background = bgColor;
+      
+      if (!this.scene.fog) {
+        this.scene.fog = new THREE.FogExp2(bgColor, 0.006);
+      } else {
+        this.scene.fog.color = bgColor;
+      }
+    };
 
     // Scene setup
     this.scene = new THREE.Scene();
-    this.scene.background = bgColor;
-    this.scene.fog = new THREE.FogExp2(bgColor, 0.006);
+    const isDarkInitial = document.body.dataset.theme === 'dark';
+    updateTheme(isDarkInitial);
+
+    window.addEventListener('themechange', (e) => {
+      updateTheme(e.detail.theme === 'dark');
+    });
 
     // Camera (default FOV = 75)
     this.defaultFov = 75;

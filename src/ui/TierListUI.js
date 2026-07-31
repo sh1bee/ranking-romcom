@@ -4,6 +4,7 @@ import { TIER_CONFIG } from '../data/cardData.js';
 import { MovieUploadModal } from './MovieUploadModal.js';
 import { MovieDetailsModal } from './MovieDetailsModal.js';
 import { StorageManager } from '../data/StorageManager.js';
+import { ThemeManager } from '../utils/ThemeManager.js';
 
 /**
  * Lightweight HTML overlay that floats OVER the WebGL canvas.
@@ -81,15 +82,27 @@ export class TierListUI {
           <span class="header-eyebrow">RANKING BOARD</span>
           <h1 class="header-title">ROM-COM</h1>
         </div>
-        <button id="resetBtn" class="reset-btn">
-          <span class="reset-icon">↻</span>
-          <span class="reset-text">RE-ENTER TUNNEL</span>
-        </button>
+        <div class="header-right">
+          <button id="themeToggleBtn" class="theme-toggle-btn" aria-label="Toggle Dark Mode">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="theme-icon moon-icon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="theme-icon sun-icon"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+          </button>
+          <button id="resetBtn" class="reset-btn">
+            <span class="reset-icon">↻</span>
+            <span class="reset-text">RE-ENTER TUNNEL</span>
+          </button>
+        </div>
       </header>
       <div class="overlay-labels" id="overlayLabels"></div>
     `;
 
     this.container.appendChild(this.wrapper);
+
+    // Theme Toggle listener
+    const themeBtn = this.wrapper.querySelector('#themeToggleBtn');
+    themeBtn.addEventListener('click', () => {
+      ThemeManager.toggle();
+    });
 
     const labelsContainer = this.wrapper.querySelector('#overlayLabels');
 
@@ -171,40 +184,40 @@ export class TierListUI {
 
     const tl = gsap.timeline();
 
-    // Header slides down
-    tl.fromTo('.overlay-header',
-      { y: -60, opacity: 0 },
-      { y: 0, opacity: 1, duration: 0.5, ease: 'power3.out' },
-      0
-    );
-
     // Overall fade-in
     tl.to(this.wrapper, {
       opacity: 1,
-      duration: 0.4,
-      ease: 'power2.out'
+      duration: 0.3,
+      ease: 'power2.inOut'
     }, 0);
 
-    // Tier labels stagger in from the left
-    tl.fromTo('.overlay-label-row',
-      { x: -80, opacity: 0 },
-      {
-        x: 0, opacity: 1,
-        duration: 0.5,
-        stagger: 0.1,
-        ease: 'back.out(1.4)'
-      },
-      0.15
+    // Header dramatic power-up (scale down + blur resolve)
+    tl.fromTo('.overlay-header',
+      { y: -30, scale: 1.1, opacity: 0, filter: 'blur(10px)' },
+      { y: 0, scale: 1, opacity: 1, filter: 'blur(0px)', duration: 0.6, ease: 'power4.out' },
+      0.1
     );
 
-    // Add buttons pop in
-    tl.fromTo('.overlay-add-btn',
-      { scale: 0, opacity: 0 },
+    // Tier labels slam in from the left with high energy
+    tl.fromTo('.overlay-label-row',
+      { x: -100, scale: 0.8, opacity: 0 },
       {
-        scale: 1, opacity: 1,
-        duration: 0.4,
-        stagger: 0.08,
-        ease: 'back.out(2)'
+        x: 0, scale: 1, opacity: 1,
+        duration: 0.5,
+        stagger: 0.06, // Faster stagger
+        ease: 'back.out(1.8)'
+      },
+      0.2
+    );
+
+    // Add buttons spin and pop in
+    tl.fromTo('.overlay-add-btn',
+      { scale: 0, rotation: -90, opacity: 0 },
+      {
+        scale: 1, rotation: 0, opacity: 1,
+        duration: 0.5,
+        stagger: 0.05,
+        ease: 'elastic.out(1, 0.6)'
       },
       0.5
     );

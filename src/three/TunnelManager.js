@@ -35,10 +35,32 @@ export class TunnelManager {
     this.buildCornerSeamLines();
   }
 
+  setRankingBoardMode(isBoard) {
+    this.isRankingBoard = isBoard;
+    this.updateLineOpacity(false);
+  }
+
+  updateLineOpacity(instant = false) {
+    if (!this.blackLineMat) return;
+    const dark = document.body.dataset.theme === 'dark';
+    const isMacOS = navigator.platform.toUpperCase().indexOf('MAC') >= 0 || navigator.userAgent.toLowerCase().includes('mac os');
+    const isMobile = window.innerWidth < 768;
+    const useBoldLines = (isMacOS && !isMobile) || this.isRankingBoard;
+    
+    const targetOpacity = dark ? (useBoldLines ? 1.0 : 0.3) : (useBoldLines ? 1.0 : 0.15);
+    
+    if (instant) {
+      this.blackLineMat.opacity = targetOpacity;
+    } else {
+      // gsap is global here or we can just import it. Let's use simple assignment if gsap is not available in TunnelManager
+      // Wait, gsap is not imported in TunnelManager.js. I'll just set it instantly.
+      this.blackLineMat.opacity = targetOpacity;
+    }
+  }
+
   buildCornerSeamLines() {
     // 6 Longitudinal corner seam lines extending deep down Z
     const cornerDepth = this.numRings * this.planeGap;
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2, transparent: true });
     
     // Calculate 6 corners of the hexagon
     // Radius of a regular hexagon is equal to its side length W (which is 8.0)
@@ -75,42 +97,69 @@ export class TunnelManager {
         new THREE.Vector3(cx, cy, 20),
         new THREE.Vector3(cx, cy, -250)
       ]);
-      const line = new THREE.Line(geo, lineMat);
+      const line = new THREE.Line(geo, this.blackLineMat);
       this.seamLines.push(line);
       this.tunnelGroup.add(line);
     });
   }
 
-  buildReferenceTunnel() {
+  buildReferenceTunnel(keepCameraPos = false) {
     const squareGeo = new THREE.PlaneGeometry(this.tileSize, this.tileSize);
     const edgesGeo = new THREE.EdgesGeometry(squareGeo);
-    const blackLineMat = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
+    // Pre-create base materials
+    const isDark = document.body.dataset.theme === 'dark';
+    
+    if (!this.baseCreamMat) {
+      this.baseCreamMat = new THREE.MeshBasicMaterial({
+        color: isDark ? 0x1C1C24 : 0xFAF6F0,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1
+      });
+    }
 
-    // Base Cream Tile Material (#FAF6F0) - Opaque & shared across normal empty slots
-    const baseCreamMat = new THREE.MeshBasicMaterial({
-      color: 0xFAF6F0,
-      side: THREE.DoubleSide,
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1
-    });
+    const isMacOS = navigator.platform.toUpperCase().indexOf('MAC') >= 0 || navigator.userAgent.toLowerCase().includes('mac os');
+    const isMobile = window.innerWidth < 768;
+    const useBoldLines = isMacOS && !isMobile;
+
+    if (!this.blackLineMat) {
+      this.blackLineMat = new THREE.LineBasicMaterial({ 
+        color: isDark ? 0x888888 : 0x000000, 
+        linewidth: 2, 
+        transparent: true
+      });
+      // Set initial opacity
+      this.updateLineOpacity(true);
+    }
+    
+    // Add event listener to update colors dynamically
+    if (!this.hasThemeListener) {
+      this.hasThemeListener = true;
+      window.addEventListener('themechange', (e) => {
+        const dark = e.detail.theme === 'dark';
+        this.baseCreamMat.color.setHex(dark ? 0x1C1C24 : 0xFAF6F0);
+        this.blackLineMat.color.setHex(dark ? 0x888888 : 0x000000);
+        this.updateLineOpacity(false); // smoothly transition on theme toggle too
+      });
+    }
 
     // Curated futuristic & architectural palettes for vibrant tile randomness
     const VIBRANT_PALETTE = [
       0xF43F5E, 0x0EA5E9, 0x8B5CF6, 0x10B981, 
-      0xF59E0B, 0x3B82F6, 0xEC4899, 0x14B8A6, 
-      0x6366F1, 0xD97706, 0x334155, 0x1E293B, 
-      0xE2E8F0, 0xFED7AA, 0xA5F3FC, 0xDDD6FE
+      0xF59E0B, 0x3B82F6, 0xEC4899, 0x14B8A6
     ];
 
     // Pre-create shared material pool for all vibrant accent colors (avoids 140+ duplicates)
-    const vibrantMatPool = VIBRANT_PALETTE.map(color => new THREE.MeshBasicMaterial({
-      color: color,
-      side: THREE.DoubleSide,
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1
-    }));
+    if (!this.vibrantMatPool) {
+      this.vibrantMatPool = VIBRANT_PALETTE.map(color => new THREE.MeshBasicMaterial({
+        color: color,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1
+      }));
+    }
 
     // Grid offsets for 4 tiles per wall: [-3, -1, +1, +3]
     const offsets = [-3.0, -1.0, 1.0, 3.0];
@@ -126,10 +175,16 @@ export class TunnelManager {
       wall_5: savedMovies.filter(m => m.tier === 'Trash')
     };
 
-    // Pre-create textures for the movies
+    // Pre-create textures for the movies utilizing a global cache for instantaneous rebuilds
+    if (!this.globalTextureCache) this.globalTextureCache = new Map();
     const movieTextures = new Map();
     savedMovies.forEach(m => {
-      movieTextures.set(m.id, createMovieTexture(m));
+      // Use stringified movie object as cache key to detect any edits
+      const cacheKey = JSON.stringify(m);
+      if (!this.globalTextureCache.has(cacheKey)) {
+        this.globalTextureCache.set(cacheKey, createMovieTexture(m));
+      }
+      movieTextures.set(m.id, this.globalTextureCache.get(cacheKey));
     });
 
     // Dummy objects for calculating exact world positions on a hexagon
@@ -142,8 +197,15 @@ export class TunnelManager {
       wall_0: [], wall_1: [], wall_2: [], wall_3: [], wall_4: [], wall_5: []
     };
 
+    // Calculate base Z position so the tunnel builds seamlessly around the current camera position
+    let baseZ = 0;
+    if (keepCameraPos) {
+      // Align the new tunnel rings with the existing infinite loop grid relative to the camera
+      baseZ = Math.floor(this.camera.position.z / this.planeGap) * this.planeGap;
+    }
+
     for (let ring = 0; ring < this.numRings; ring++) {
-      const z = -ring * this.planeGap;
+      const z = baseZ - ring * this.planeGap;
       for (let i = 0; i < 6; i++) {
         const wallKey = `wall_${i}`;
         parentDummy.rotation.z = i * Math.PI / 3;
@@ -197,11 +259,11 @@ export class TunnelManager {
       slots.forEach(t => {
         // Assign shared material references instead of cloning
         let emptyMat;
-        if (Math.random() < 0.19 && vibrantMatPool.length > 0) {
-          const randIdx = Math.floor(Math.random() * vibrantMatPool.length);
-          emptyMat = vibrantMatPool[randIdx];
+        if (Math.random() < 0.19 && this.vibrantMatPool.length > 0) {
+          const randIdx = Math.floor(Math.random() * this.vibrantMatPool.length);
+          emptyMat = this.vibrantMatPool[randIdx];
         } else {
-          emptyMat = baseCreamMat;
+          emptyMat = this.baseCreamMat;
         }
 
         let mat;
@@ -226,7 +288,7 @@ export class TunnelManager {
         mesh.rotation.copy(t.rot);
 
         // Crisp black wireframe edge
-        const lineEdges = new THREE.LineSegments(edgesGeo, blackLineMat);
+        const lineEdges = new THREE.LineSegments(edgesGeo, this.blackLineMat);
         mesh.add(lineEdges);
 
         mesh.userData = {
@@ -349,15 +411,15 @@ export class TunnelManager {
     this.seamLines = [];
   }
 
-  rebuildTunnel() {
-    // Seamlessly reset camera back to coordinate origin behind the opaque white flash
-    this.camera.position.set(0, 0, 0);
-
+  rebuildTunnel(keepCameraPos = false) {
+    if (!keepCameraPos) {
+      this.camera.position.set(0, 0, 0);
+    }
+    
     this.clearTunnel();
-    this.buildReferenceTunnel();
-    this.buildCornerSeamLines();
+    this.buildReferenceTunnel(keepCameraPos);
+    this.buildCornerSeamLines(keepCameraPos);
 
-    // Resume movement immediately from origin
     this.currentSpeed = this.baseSpeed;
     this.targetSpeed = this.baseSpeed;
     this.isWarping = false;

@@ -4,12 +4,16 @@ import { TransitionController } from './three/TransitionController.js';
 import { InteractionController } from './ui/InteractionController.js';
 import { TierListUI } from './ui/TierListUI.js';
 import { StorageManager } from './data/StorageManager.js';
+import { ThemeManager } from './utils/ThemeManager.js';
 import * as THREE from 'three';
 import gsap from 'gsap';
 
 class App {
   constructor() {
     this.container = document.getElementById('canvas-container');
+
+    // 0. Theme Setup
+    ThemeManager.init();
 
     // 1. Three.js Setup
     this.threeSetup = new ThreeSetup(this.container);

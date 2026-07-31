@@ -15,6 +15,16 @@
   --font: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
 }
 
+[data-theme="dark"] {
+  --bg-cream: #0A0A0F;
+  --tile-cream: #1C1C24; /* Brighter empty tile background */
+  --text-dark: #FDFDFD;
+  --text-muted: #A1A1AA;
+  --border: #3F3F46;
+  --shadow: 4px 4px 0 #000000;
+  --shadow-hover: 6px 6px 0 #000000;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
   width: 100%; height: 100%; overflow: hidden;
@@ -163,7 +173,7 @@ html, body {
   pointer-events: none;
 }
 .warp-hint-toast {
-  background: #FAF6F0;
+  background: var(--tile-cream);
   border: 2px solid var(--border);
   box-shadow: var(--shadow);
   padding: 10px 24px; border-radius: 999px;
@@ -196,7 +206,7 @@ html, body {
 .overlay-header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 16px 28px; flex-shrink: 0;
-  background: #F2ECE4;
+  background: var(--bg-cream);
   border-bottom: 3px solid var(--border);
   pointer-events: auto;
 }
@@ -209,6 +219,40 @@ html, body {
   font-size: 22px; font-weight: 900;
   letter-spacing: 1px;
 }
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.theme-toggle-btn {
+  background: var(--tile-cream);
+  border: 2px solid var(--border);
+  box-shadow: var(--shadow);
+  width: 36px; height: 36px;
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: transform .15s, box-shadow .15s, background .15s;
+  pointer-events: auto;
+  color: var(--text-dark);
+}
+.theme-toggle-btn:hover {
+  transform: translate(-2px,-2px);
+  box-shadow: var(--shadow-hover);
+}
+.theme-toggle-btn:active {
+  transform: translate(2px,2px);
+  box-shadow: 2px 2px 0 var(--border);
+}
+.theme-icon {
+  width: 18px; height: 18px;
+}
+/* Hide moon in dark mode, hide sun in light mode */
+.theme-icon.moon-icon { display: block; }
+.theme-icon.sun-icon { display: none; }
+[data-theme="dark"] .theme-icon.moon-icon { display: none; }
+[data-theme="dark"] .theme-icon.sun-icon { display: block; }
+
 .reset-btn {
   background: var(--tile-cream);
   border: 2px solid var(--border);
@@ -218,8 +262,9 @@ html, body {
   font-size: 12px; font-weight: 900;
   letter-spacing: .5px; cursor: pointer;
   display: flex; align-items: center; gap: 8px;
-  transition: transform .15s, box-shadow .15s;
+  transition: transform .15s, box-shadow .15s, background .15s;
   pointer-events: auto;
+  color: var(--text-dark);
 }
 .reset-btn:hover {
   transform: translate(-2px,-2px);
@@ -273,11 +318,11 @@ html, body {
 /* Add-tile button (right side of label) */
 .overlay-add-btn {
   width: 38px; height: 38px;
-  border: 2px dashed rgba(0,0,0,0.35);
+  border: 2px dashed var(--text-muted);
   border-radius: var(--radius-sm);
-  background: #FAF6F0;
+  background: var(--tile-cream);
   font-size: 22px; font-weight: 400;
-  color: rgba(0,0,0,0.4);
+  color: var(--text-muted);
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   pointer-events: auto;
@@ -286,7 +331,7 @@ html, body {
 .overlay-add-btn:hover {
   border-color: var(--border);
   color: var(--border);
-  background: rgba(250,246,240,0.95);
+  background: var(--tile-cream);
   transform: scale(1.1);
   box-shadow: 2px 2px 0 var(--border);
 }
@@ -390,10 +435,7 @@ html, body {
 /* Movie Upload Modal */
 .movie-modal-wrapper {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  inset: 0;
   z-index: 10000;
   display: flex;
   align-items: center;
@@ -414,8 +456,7 @@ html, body {
   position: relative;
   width: 90%;
   max-width: 480px;
-  max-height: 90dvh;
-  max-height: 90vh;
+  max-height: 90%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   background: rgba(20, 20, 26, 0.92);
@@ -610,8 +651,7 @@ html, body {
 /* Movie Details Modal */
 .movie-details-modal {
   position: fixed;
-  top: 0; left: 0;
-  width: 100vw; height: 100vh;
+  inset: 0;
   z-index: 10001;
   display: flex;
   align-items: center; justify-content: center;
@@ -633,7 +673,7 @@ html, body {
   width: 900px;
   max-width: 95vw;
   height: 750px;
-  max-height: 85vh;
+  max-height: 90%;
   background: #14141A;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 24px;
